@@ -4294,8 +4294,9 @@ W:	https://clangbuiltlinux.github.io/
 B:	https://github.com/ClangBuiltLinux/linux/issues
 C:	irc://chat.freenode.net/clangbuiltlinux
 F:	Documentation/kbuild/llvm.rst
+F:	include/linux/compiler-clang.h
+F:	scripts/Makefile.clang
 F:	scripts/clang-tools/
-F:	scripts/lld-version.sh
 K:	\b(?i:clang|llvm)\b
 
 CLEANCACHE API
@@ -16670,12 +16671,6 @@ STAGING - REALTEK RTL8188EU DRIVERS
 M:	Larry Finger <Larry.Finger@lwfinger.net>
 S:	Odd Fixes
 F:	drivers/staging/rtl8188eu/
-
-STAGING - REALTEK RTL8712U DRIVERS
-M:	Larry Finger <Larry.Finger@lwfinger.net>
-M:	Florian Schilhabel <florian.c.schilhabel@googlemail.com>.
-S:	Odd Fixes
-F:	drivers/staging/rtl8712/
 
 STAGING - SEPS525 LCD CONTROLLER DRIVERS
 M:	Michael Hennerich <michael.hennerich@analog.com>
