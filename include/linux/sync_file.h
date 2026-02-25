@@ -34,6 +34,8 @@
  */
 struct sync_file {
 	struct file		*file;
+#ifdef __GENKSYMS__
+	// HACK: CRC ABI fixups
 	/**
 	 * @user_name:
 	 *
@@ -42,6 +44,10 @@ struct sync_file {
 	 * entire array is 0).
 	 */
 	char			user_name[32];
+#else
+	/* HACK: KABI preservation, DO NOT USE! */
+	char			unused[32];
+#endif
 #ifdef CONFIG_DEBUG_FS
 	struct list_head	sync_file_list;
 #endif
@@ -57,6 +63,5 @@ struct sync_file {
 
 struct sync_file *sync_file_create(struct dma_fence *fence);
 struct dma_fence *sync_file_get_fence(int fd);
-char *sync_file_get_name(struct sync_file *sync_file, char *buf, int len);
 
 #endif /* _LINUX_SYNC_H */
