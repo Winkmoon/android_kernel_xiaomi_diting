@@ -26,26 +26,20 @@ config CC_VERSION_TEXT
 	    and then every file will be rebuilt.
 
 config CC_IS_GCC
-	def_bool $(success,echo "$(CC_VERSION_TEXT)" | grep -q gcc)
+	def_bool $(success,test "$(cc-name)" = GCC)
 
 config GCC_VERSION
 	int
-	default $(shell,$(srctree)/scripts/gcc-version.sh $(CC)) if CC_IS_GCC
+	default $(cc-version) if CC_IS_GCC
 	default 0
 
-config LD_VERSION
-	int
-	default $(shell,$(LD) --version | $(srctree)/scripts/ld-version.sh)
-
 config CC_IS_CLANG
-	def_bool $(success,echo "$(CC_VERSION_TEXT)" | grep -q clang)
-
-config LD_IS_LLD
-	def_bool $(success,$(LD) -v | head -n 1 | grep -q LLD)
+	def_bool $(success,test "$(cc-name)" = Clang)
 
 config CLANG_VERSION
 	int
-	default $(shell,$(srctree)/scripts/clang-version.sh $(CC))
+	default $(cc-version) if CC_IS_CLANG
+	default 0
 
 config AS_IS_GNU
 	def_bool $(success,test "$(as-name)" = GNU)
@@ -59,9 +53,21 @@ config AS_VERSION
 	default CLANG_VERSION if AS_IS_LLVM
 	default $(as-version)
 
+config LD_IS_BFD
+	def_bool $(success,test "$(ld-name)" = BFD)
+
+config LD_VERSION
+	int
+	default $(ld-version) if LD_IS_BFD
+	default 0
+
+config LD_IS_LLD
+	def_bool $(success,test "$(ld-name)" = LLD)
+
 config LLD_VERSION
 	int
-	default $(shell,$(srctree)/scripts/lld-version.sh $(LD))
+	default $(ld-version) if LD_IS_LLD
+	default 0
 
 config CC_CAN_LINK
 	bool
@@ -856,6 +862,42 @@ config UCLAMP_BUCKETS_COUNT
 
 endmenu
 
+menu "FAIR Scheuler tunables"
+
+choice
+	prompt "Utilization's PELT half-Life"
+	default PELT_UTIL_HALFLIFE_DEFAULT
+	help
+	  Allows choosing one of the possible values for the PELT half-life to
+	  be used for the update of the utilization of tasks and CPUs.
+	  The half-life is the amount of [ms] required by the PELT signal to
+	  build up to 50% utilization. The higher the half-life the longer it
+	  takes for a task to be represented as a big one.
+
+	  Note that adjusting PELT half-life via kernel parameters is only
+	  allowed when PELT_UTIL_HALFLIFE_DEFAULT is selected.
+
+	  If not sure, use the default.
+
+config PELT_UTIL_HALFLIFE_DEFAULT
+	bool "Default (32 ms)"
+
+config PELT_UTIL_HALFLIFE_32
+	bool "32 ms"
+
+config PELT_UTIL_HALFLIFE_16
+	bool "16 ms"
+
+config PELT_UTIL_HALFLIFE_12
+	bool "12 ms"
+
+config PELT_UTIL_HALFLIFE_8
+	bool "8 ms"
+
+endchoice
+
+endmenu # FAIR Scheduler tunables"
+
 #
 # For architectures that want to enable the support for NUMA-affine scheduler
 # balancing logic:
@@ -1339,6 +1381,24 @@ config BOOT_CONFIG
 	  See <file:Documentation/admin-guide/bootconfig.rst> for details.
 
 	  If unsure, say Y.
+
+config CMDLINE_LOG_WRAP_IDEAL_LEN
+	int "Length to try to wrap the cmdline when logged at boot"
+	default 974
+	range 0 974
+	help
+	  At boot time, the kernel command line is logged to the console.
+	  The log message will start with the prefix "Kernel command line: ".
+	  The log message will attempt to be wrapped (split into multiple log
+	  messages) at spaces based on CMDLINE_LOG_WRAP_IDEAL_LEN characters.
+	  If wrapping happens, each log message will start with the prefix and
+	  all but the last message will end with " \". Messages may exceed the
+	  ideal length if a place to wrap isn't found before the specified
+	  number of characters.
+
+	  A value of 0 disables wrapping, though be warned that the maximum
+	  length of a log message (1021 characters) may cause the cmdline to
+	  be truncated.
 
 choice
 	prompt "Compiler optimization level"
