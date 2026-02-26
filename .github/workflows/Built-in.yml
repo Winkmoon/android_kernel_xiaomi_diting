@@ -56,8 +56,8 @@ jobs:
           lscpu
           neofetch
           wget -O LLVM-20.1.0-Linux-X64.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-Linux-X64.tar.xz
-          mkdir -p aosp-clang
-          tar -xvaf LLVM-20.1.0-Linux-X64.tar.xz -C aosp-clang
+          tar -xvaf LLVM-20.1.0-Linux-X64.tar.xz
+          mv LLVM-20.1.0-Linux-X64 aosp-clang
           rm LLVM-20.1.0-Linux-X64.tar.xz
           echo "AOSP_CLANG_PATH=$(pwd)/aosp-clang" >> $GITHUB_ENV
           echo "PATH=$(pwd)/aosp-clang/bin:$PATH" >> $GITHUB_ENV
