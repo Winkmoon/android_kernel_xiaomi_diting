@@ -117,11 +117,7 @@ jobs:
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
           cp ../out/arch/arm64/boot/Image ./Image
-          if [ ! -f ./Image ]; then
-            exit 1
-          fi
-            zip -r ../AnyKernel3_xiaomi_diting_ksunext.zip ./*
-          fi
+          zip -r ../AnyKernel3_xiaomi_diting_ksunext.zip ./*
       
       - name: 上传 ZIP 工件
         uses: actions/upload-artifact@v4
