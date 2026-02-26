@@ -1,0 +1,176 @@
+name: Build Kernel
+env:
+  TZ: Asia/Shanghai
+  ANDROID_VERSION: 'android12'
+  KERNEL_VERSION: '5.10'
+  KERNEL_NAME: 'Xinran_MI-Dev'
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_suffix:
+        description: '内核后缀(留空默认,开头别加连字符)'
+        required: false
+        type: string
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ksuver: ${{ steps.ksu_version.outputs.ksuver }}
+    steps:
+      - name: 最大化建筑空间
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+      
+      - name: 安装配置环境依赖
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            build-essential \
+            flex bison \
+            dwarves \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            python3 \
+            python-is-python3 \
+            make \
+            cmake \
+            zip \
+            curl \
+            wget \
+            gnupg \
+            gcc-multilib \
+            g++-multilib \
+            ccache \
+            rsync \
+            binutils-aarch64-linux-gnu \
+            binutils-arm-linux-gnueabihf \
+            neofetch
+          lscpu
+          neofetch
+          wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-Linux-X64.tar.xz
+          mv LLVM-20* LLVM-20.1.0-Linux-X64.tar.xz
+          mkdir -p aosp-clang
+          tar -xvaf LLVM-20.1.0-Linux-X64.tar.xz -C aosp-clang
+          rm LLVM-20.1.0-Linux-X64.tar.xz
+          echo "AOSP_CLANG_PATH=$(pwd)/aosp-clang" >> $GITHUB_ENV
+          echo "PATH=$(pwd)/aosp-clang/bin:$PATH" >> $GITHUB_ENV
+      - name: 初始化源码仓库
+        run: |
+          rm -rf kernel_workspace && mkdir kernel_workspace && cd kernel_workspace
+          git clone --depth=1 https://github.com/Winkmoon/android_kernel_xiaomi_diting -b master common
+          rm common/android/abi_gki_protected_exports_* || true
+      
+      - name: 添加 SukiSU-Ultra
+        id: ksu_version
+        run: |
+          cd kernel_workspace
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
+      
+      - name: 添加 SukiSU-Ultra 配置项
+        run: |
+          cd kernel_workspace
+          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+
+      
+      - name: 添加制作名称
+        run: |
+          cd kernel_workspace
+          cd common
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            for f in ./arch/arm64/configs/xiaomi_diting_defconfig; do
+              sed -i "s/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"-${{ github.event.inputs.kernel_suffix }}\"/" "$f"
+            done
+          fi
+      
+      - name: 构建内核
+        continue-on-error: true
+        run: |
+          cd kernel_workspace/common
+          export ARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
+          export PATH=$AOSP_CLANG_PATH/bin:$PATH
+          export LLVM=1
+          export LLVM_IAS=0
+          export KCFLAGS="-Wno-error -Wno-deprecated-declarations"
+          export KBUILD_BUILD_VERSION="0"
+          export SOURCE_DATE_EPOCH=$(date +%s)
+          export KBUILD_BUILD_USER=XinRan♡
+          export KBUILD_BUILD_HOST=Bai
+          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="clang" BUILD_CONFIG=build.config.gki.aarch64 O=out DEPMOD=depmod xiaomi_diting_defconfig
+          scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+      
+      - name: 克隆 AnyKernel3 并打包
+        run: |
+          cd kernel_workspace
+          cd common
+          git clone https://github.com/Winkmoon/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          cd AnyKernel3
+          cp ../out/arch/arm64/boot/Image ./Image
+          if [ ! -f ./Image ]; then
+            exit 1
+          fi
+            zip -r ../AnyKernel3_xiaomi_diting_ksunext.zip ./*
+          fi
+      
+      - name: 上传 ZIP 工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_ZIP_Artifacts
+          path: ${{ github.workspace }}/kernel_workspace/common/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+      
+    steps:
+      - name: 下载 ZIP 工件
+        uses: actions/download-artifact@v4
+        with:
+          name: Kernel_ZIP_Artifacts
+          path: ./release_zips
+      
+      - name: 设置环境变量
+        run: |
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            FULL_VERSION=${{ format('{0}.259-{1}', env.KERNEL_VERSION, github.event.inputs.kernel_suffix) }}
+            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          else
+            FULL_VERSION=${{ format('{0}.259-{1}', env.KERNEL_VERSION, env.KERNEL_NAME) }}
+            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          fi
+          TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
+          TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+          echo "TIME=$TIME" >> $GITHUB_ENV
+          echo "TIME_FORM=$TIME_FORM" >> $GITHUB_ENV
+          TAG_HEAD="Kernel-build"
+          echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
+      
+      - name: 创建发布
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "${{ env.TAG_HEAD }}-${{ env.TIME }}"
+          name: "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}"
+          body: |
+            测试产物
+            
+          draft: false
+          prerelease: false
+          files: |
+            release_zips/AnyKernel3_*.zip
