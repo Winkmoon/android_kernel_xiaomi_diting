@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel-KSUNEXT
 env:
   TZ: Asia/Shanghai
   ANDROID_VERSION: 'android12'
