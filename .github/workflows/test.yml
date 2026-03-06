@@ -90,7 +90,7 @@ jobs:
           echo "正在启用BBG基带守护…"
           curl -LSs https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/main/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
-          echo "CONFIG_BBG=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_BBG=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
 
       - name: 集成SUSFS
         run: |
