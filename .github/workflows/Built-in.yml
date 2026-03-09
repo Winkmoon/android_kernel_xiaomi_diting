@@ -140,32 +140,3 @@ jobs:
           name: Kernel_ZIP_Artifacts
           path: ./release_zips
       
-      - name: 设置环境变量
-        run: |
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ format('{0}.251-{1}', env.KERNEL_VERSION, github.event.inputs.kernel_suffix) }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-          else
-            FULL_VERSION=${{ format('{0}.251-{1}', env.KERNEL_VERSION, env.KERNEL_NAME) }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-          fi
-          TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
-          TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
-          echo "TIME=$TIME" >> $GITHUB_ENV
-          echo "TIME_FORM=$TIME_FORM" >> $GITHUB_ENV
-          TAG_HEAD="Kernel-build"
-          echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
-      
-      - name: 创建发布
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: "${{ env.TAG_HEAD }}-${{ env.TIME }}"
-          name: "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}"
-          body: |
-            测试产物
-            
-          draft: false
-          prerelease: false
-          files: |
-            release_zips/AnyKernel3_*.zip
