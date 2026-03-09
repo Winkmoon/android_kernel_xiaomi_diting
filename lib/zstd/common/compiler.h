@@ -243,9 +243,9 @@ ptrdiff_t ZSTD_wrappedPtrDiff(unsigned char const* lhs, unsigned char const* rhs
  */
 MEM_STATIC
 ZSTD_ALLOW_POINTER_OVERFLOW_ATTR
-const void* ZSTD_wrappedPtrAdd(const void* ptr, ptrdiff_t add)
+unsigned char const* ZSTD_wrappedPtrAdd(unsigned char const* ptr, ptrdiff_t add)
 {
-    return (const char*)ptr + add;
+    return ptr + add;
 }
 
 /*
@@ -256,9 +256,9 @@ const void* ZSTD_wrappedPtrAdd(const void* ptr, ptrdiff_t add)
  */
 MEM_STATIC
 ZSTD_ALLOW_POINTER_OVERFLOW_ATTR
-const void* ZSTD_wrappedPtrSub(const void* ptr, ptrdiff_t sub)
+unsigned char const* ZSTD_wrappedPtrSub(unsigned char const* ptr, ptrdiff_t sub)
 {
-    return (const char*)ptr - sub;
+    return ptr - sub;
 }
 
 /*
@@ -268,9 +268,9 @@ const void* ZSTD_wrappedPtrSub(const void* ptr, ptrdiff_t sub)
  * @returns `ptr + add` except it defines `NULL + 0 == NULL`.
  */
 MEM_STATIC
-void* ZSTD_maybeNullPtrAdd(void* ptr, ptrdiff_t add)
+unsigned char* ZSTD_maybeNullPtrAdd(unsigned char* ptr, ptrdiff_t add)
 {
-    return add > 0 ? (char*)ptr + add : ptr;
+    return add > 0 ? ptr + add : ptr;
 }
 
 /* Issue #3240 reports an ASAN failure on an llvm-mingw build. Out of an

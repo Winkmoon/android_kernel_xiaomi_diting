@@ -1,2 +1,8 @@
-obj-$(CONFIG_LZ4K_OPLUS_COMPRESS) += lz4k_oplus_compress.o
-obj-$(CONFIG_LZ4K_OPLUS_DECOMPRESS) += lz4k_oplus_decompress.o
+GCOV_PROFILE := y
+
+obj-$(CONFIG_CRYPTO_LZ4K_OPLUS) += crypto_lz4k_oplus.o
+
+crypto_lz4k_oplus-y := \
+		lz4k.o \
+		lz4k_compress.o \
+		lz4k_decompress.o

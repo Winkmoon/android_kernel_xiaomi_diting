@@ -1,4 +1,4 @@
-#include <linux/lz4k_oplus.h>
+#include "lz4k.h"
 
 #define NR_COPY_LOG2 4
 #define NR_COPY_MIN (1 << NR_COPY_LOG2)
@@ -39,11 +39,8 @@ inline static void copy_x_while_total(
 	const size_t copy_min)
 {
 	LZ4_memcpy(dst, src, copy_min);
-	for (; total > copy_min; total -= copy_min){
-		dst += copy_min;
-		src += copy_min;
-		LZ4_memcpy(dst, src, copy_min);
-	}
+	for (; total > copy_min; total -= copy_min)
+		LZ4_memcpy(dst += copy_min, src += copy_min, copy_min);
 }
 
 inline static void  update_token(
@@ -59,10 +56,7 @@ inline static void  update_token(
 
 inline static BYTE *dest_size_bytes(BYTE *dest_at, U32 u)
 {
-	for (; u >= BYTE_MAX;){
-		*dest_at++ = (BYTE)BYTE_MAX;
-		u -= BYTE_MAX;
-	}
+	for (; u >= BYTE_MAX; *dest_at++ = (BYTE)BYTE_MAX, u -= BYTE_MAX);
 	*dest_at++ = (BYTE)u;
 	return dest_at;
 }
@@ -238,7 +232,7 @@ static int compress_64k(
 	const BYTE *const source_end_safe = source_end - NR_COPY_MIN;
 	const BYTE *r = base;
 	const BYTE *nr0 = r++;
-	BYTE *dest_at = dest + 1;
+	BYTE *dest_at = dest;
 	for (; ; nr0 = r) {
 		const BYTE *q = 0;
 		U32 step = 1 << STEP_LOG2;
@@ -246,15 +240,12 @@ static int compress_64k(
 		const BYTE *r_end = 0;
 		U32 match_length = 0;
 		while (true) {
-			q = hashed(base, dict, hash(r), r);
-			if (equal4(q, r))
+			if (equal4(q = hashed(base, dict, hash(r), r), r))
 				break;
 			++r;
-			q = hashed(base, dict, hash(r), r);
-			if (equal4(q, r))
+			if (equal4(q = hashed(base, dict, hash(r), r), r))
 				break;
-			r += (++step >> STEP_LOG2);
-			if (unlikely(r > source_end_safe))
+			if (unlikely((r += (++step >> STEP_LOG2)) > source_end_safe))
 				return dest_tail(dest_at, dest_end, dest, nr0, source_end,
 						NR_LOG2, OFF_LOG2);
 		}
@@ -268,8 +259,7 @@ static int compress_64k(
 		else
 			dest_at = dest_tuple(dest_at, dest_end, token, nr0, r, match_length,
 					    NR_LOG2, OFF_LOG2);
-		r += match_length;
-		if (unlikely(r > source_end_safe))
+		if (unlikely((r += match_length) > source_end_safe))
 			return dest_tail2(dest_at, dest_end, dest, r, source_end,
 					 NR_LOG2, OFF_LOG2);
 		/* update r-1 every iters, no need to worry about overflows since r >= 1 */
