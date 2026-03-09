@@ -1,0 +1,247 @@
+name: Test-Build
+env:
+  TZ: Asia/Shanghai
+  ANDROID_VERSION: 'android12'
+  KERNEL_VERSION: '5.10'
+  KERNEL_NAME: 'Xiaomi-ShirokoNekoKernel'
+  ENABLE_BBG: ${{ github.event.inputs.enable_bbg }}
+on:
+  workflow_dispatch:
+    inputs:
+      enable_bbg:
+        description: "开启BBG基带守护"
+        required: false
+        default: true
+        type: boolean
+        
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ksuver: ${{ steps.ksu_version.outputs.ksuver }}
+    steps:
+      - name: 最大化建筑空间
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+      
+      - name: 安装配置环境依赖
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            build-essential \
+            flex bison \
+            dwarves \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            python3 \
+            python-is-python3 \
+            make \
+            cmake \
+            zip \
+            curl \
+            wget \
+            gnupg \
+            gawk \
+            gcc-multilib \
+            g++-multilib \
+            ccache \
+            rsync \
+            binutils-aarch64-linux-gnu \
+            binutils-arm-linux-gnueabihf \
+
+          wget -O LLVM-20.1.0-Linux-X64.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-Linux-X64.tar.xz
+          tar -xvaf LLVM-20.1.0-Linux-X64.tar.xz
+          mv LLVM-20.1.0-Linux-X64 aosp-clang
+          rm LLVM-20.1.0-Linux-X64.tar.xz
+          echo "AOSP_CLANG_PATH=$(pwd)/aosp-clang" >> $GITHUB_ENV
+          echo "PATH=$(pwd)/aosp-clang/bin:$PATH" >> $GITHUB_ENV
+
+      - name: 初始化源码仓库
+        run: |
+          rm -rf kernel_workspace && mkdir kernel_workspace && cd kernel_workspace
+          git clone --depth=1 https://github.com/Winkmoon/android_kernel_xiaomi_diting -b master common
+          echo "正在去除 ABI 保护 & 去除 dirty 后缀..."
+          sudo sed -i 's/check_defconfig//' ./common/build.config.gki
+          rm common/android/abi_gki_protected_exports_* || true
+          for f in common/scripts/setlocalversion; do
+          sed -i 's/ -dirty//g' "$f"
+          sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
+          done
+      
+      - name: 添加 ReSukiSU
+        id: ksu_version
+        run: |
+          cd kernel_workspace/common
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KPM=n" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+
+      - name: 开启BBG基带守护
+        if: ${{ env.ENABLE_BBG == 'true' }}
+        run: |
+          cd kernel_workspace/common
+          echo "正在启用BBG基带守护…"
+          curl -LSs https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/main/setup.sh | bash
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+          echo "CONFIG_BBG=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+
+      - name: 集成SUSFS
+        run: |
+          cd kernel_workspace
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu susfs4ksu -b gki-android12-5.10
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch ./common/
+          cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          cd ./common
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
+
+      - name: 启用一系列优化选项开关
+        run: |
+          cd kernel_workspace
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@Xinran"' >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo 'CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_CRYPTO_LZ4=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_CRYPTO_ZSTD=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_F2FS_FS_COMPRESSION=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_F2FS_FS_LZ4=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_F2FS_FS_LZ4HC=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_F2FS_FS_ZSTD=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          
+          echo "CONFIG_ZSMALLOC=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_ZRAM=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_ZRAM_WRITEBACK=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_SWAP=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          
+          echo "CONFIG_NET_SCH_FQ_CODEL=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_SFQ=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_HTB=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_TBF=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_SFB=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_RED=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_NET_SCH_INGRESS=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_DEFAULT_FQ_CODEL=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo 'CONFIG_DEFAULT_NET_SCH="fq_codel"' >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          
+          echo "CONFIG_IP_ECN=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_TCP_ECN=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_IPV6_ECN=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_IP_NF_TARGET_ECN=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          
+          echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          
+          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_TMPFS=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+
+      
+      - name: 构建内核
+        continue-on-error: true
+        run: |
+          cd kernel_workspace/common
+          export ARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
+          export PATH=$AOSP_CLANG_PATH/bin:$PATH
+          export LLVM=1
+          export LLVM_IAS=0
+          export KCFLAGS="-Wno-error -Wno-deprecated-declarations"
+          export KBUILD_BUILD_VERSION="0"
+          export SOURCE_DATE_EPOCH=$(date +%s)
+          export KBUILD_BUILD_USER=XinRan♡
+          export KBUILD_BUILD_HOST=Bai
+          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="clang" BUILD_CONFIG=build.config.gki.aarch64 O=out DEPMOD=depmod xiaomi_diting_defconfig
+          scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+      
+      - name: 克隆 AnyKernel3 并打包
+        run: |
+          cd kernel_workspace
+          cd common
+          git clone https://github.com/Winkmoon/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          cd AnyKernel3
+          cp ../out/arch/arm64/boot/Image ./Image
+          zip -r ../AnyKernel3_xiaomi_diting.zip ./*
+      
+      - name: 上传 ZIP 工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_ZIP_Artifacts
+          path: ${{ github.workspace }}/kernel_workspace/common/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+      
+    steps:
+      - name: 下载 ZIP 工件
+        uses: actions/download-artifact@v4
+        with:
+          name: Kernel_ZIP_Artifacts
+          path: ./release_zips
+      
+      - name: 设置环境变量
+        run: |
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            FULL_VERSION=${{ format('{0}.251-{1}', env.KERNEL_VERSION, github.event.inputs.kernel_suffix) }}
+            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          else
+            FULL_VERSION=${{ format('{0}.251-{1}', env.KERNEL_VERSION, env.KERNEL_NAME) }}
+            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          fi
+          TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
+          TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+          echo "TIME=$TIME" >> $GITHUB_ENV
+          echo "TIME_FORM=$TIME_FORM" >> $GITHUB_ENV
+          TAG_HEAD="Kernel-build"
+          echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
+      
+      - name: 创建发布
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "${{ env.TAG_HEAD }}-${{ env.TIME }}"
+          name: "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}"
+          body: |
+            ##小米高通5.10全系-ShirokoNekoKernel发布##
+            -集成ReSukiSU
+            -添加SUSFS2.0
+            -开启BBG基带守护
+            -开启一系列优化
+            -再一次新增压缩算法
+            
+          draft: false
+          prerelease: false
+          files: |
+            release_zips/AnyKernel3_*.zip
