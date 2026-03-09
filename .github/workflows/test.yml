@@ -111,7 +111,6 @@ jobs:
           echo 'CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_CRYPTO_LZ4=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
-          echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_CRYPTO_ZSTD=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_F2FS_FS_COMPRESSION=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_F2FS_FS_LZ4=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
