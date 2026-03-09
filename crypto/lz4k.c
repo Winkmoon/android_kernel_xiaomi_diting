@@ -10,9 +10,10 @@
 #include <linux/crypto.h>
 #include <linux/vmalloc.h>
 #include <linux/lz4k.h>
-#include <crypto/algapi.h>
-#include <crypto/internal/scompress.h>
 
+
+__weak int zram_register_alg(const char *name) { return 0; }
+__weak int zram_unregister_alg(const char *name) { return 0; }
 
 struct lz4k_ctx {
 	void *lz4k_comp_mem;

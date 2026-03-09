@@ -9,18 +9,6 @@
  * You may select, at your option, one of the above-listed licenses.
  */
 
-/*
- * Disable inlining for the optimal parser for the kernel build.
- * It is unlikely to be used in the kernel, and where it is used
- * latency shouldn't matter because it is very slow to begin with.
- * We prefer a ~180KB binary size win over faster optimal parsing.
- *
- * TODO(https://github.com/facebook/zstd/issues/2862):
- * Improve the code size of the optimal parser in general, so we
- * don't need this hack for the kernel build.
- */
-#define ZSTD_NO_INLINE 1
-
 #include "zstd_compress_internal.h"
 #include "hist.h"
 #include "zstd_opt.h"
@@ -1395,16 +1383,8 @@ _shortestPath:   /* cur, last_pos, best_mlen, best_off have to be set */
             assert(storeEnd < ZSTD_OPT_SIZE);
             DEBUGLOG(6, "last stretch copied into pos=%u (llen=%u,mlen=%u,ofc=%u)",
                         storeEnd, lastStretch.litlen, lastStretch.mlen, lastStretch.off);
-            if (lastStretch.litlen > 0) {
-                /* last "sequence" is unfinished: just a bunch of literals */
-                opt[storeEnd].litlen = lastStretch.litlen;
-                opt[storeEnd].mlen = 0;
-                storeStart = storeEnd-1;
-                opt[storeStart] = lastStretch;
-            } {
-                opt[storeEnd] = lastStretch;  /* note: litlen will be fixed */
-                storeStart = storeEnd;
-            }
+            opt[storeEnd] = lastStretch;  /* note: litlen will be fixed */
+            storeStart = storeEnd;
             while (1) {
                 ZSTD_optimal_t nextStretch = opt[stretchPos];
                 opt[storeStart].litlen = nextStretch.litlen;
