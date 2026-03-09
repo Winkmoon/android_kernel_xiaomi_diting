@@ -241,7 +241,7 @@ jobs:
             -开启BBG基带守护
             -开启一系列优化
             -再一次新增压缩算法
-            -剔除lz4kd/修复异常占用
+            -上个版本无法使用rec，故紧急回退
             
           draft: false
           prerelease: false
