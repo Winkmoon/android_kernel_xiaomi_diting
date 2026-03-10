@@ -179,8 +179,7 @@ jobs:
           export KBUILD_BUILD_HOST=Bai
           make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="clang" BUILD_CONFIG=build.config.gki.aarch64 O=out DEPMOD=depmod xiaomi_diting_defconfig
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
-          export CFLAGS="-Wno-implicit-function-declaration"
-          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CFLAGS="-Wno-implicit-function-declaration"
       
       - name: 克隆 AnyKernel3 并打包
         run: |
