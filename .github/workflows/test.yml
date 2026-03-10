@@ -76,11 +76,11 @@ jobs:
           sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
           done
       
-      - name: 集成KernelSU-Next
+      - name: 集成SukiSU
         id: ksu_version
         run: |
           cd kernel_workspace/common
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev_susfs
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
           echo "CONFIG_KPM=n" >> ./arch/arm64/configs/xiaomi_diting_defconfig
 
@@ -179,7 +179,7 @@ jobs:
           export KBUILD_BUILD_HOST=Bai
           make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="clang" BUILD_CONFIG=build.config.gki.aarch64 O=out DEPMOD=depmod xiaomi_diting_defconfig
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
-          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 KBUILD_CFLAGS="-Wno-error=implicit-function-declaration"
+          make -j24 O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
       
       - name: 克隆 AnyKernel3 并打包
         run: |
@@ -236,7 +236,7 @@ jobs:
           name: "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}"
           body: |
             ##小米高通5.10全系-ShirokoNekoKernel重启发布##
-            -更换ROOT方案为KernelSU-Next
+            -更换ROOT方案为SukiSU
             -添加SUSFS2.0
             -开启BBG基带守护
             -开启一系列优化
