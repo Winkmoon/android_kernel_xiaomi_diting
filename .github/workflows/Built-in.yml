@@ -67,16 +67,16 @@ jobs:
           git clone --depth=1 https://github.com/Winkmoon/android_kernel_xiaomi_diting -b master common
           rm common/android/abi_gki_protected_exports_* || true
       
-      - name: 添加 KernelSU-Next
-        id: ksu_version
-        run: |
-          cd kernel_workspace
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
+      #- name: 添加 KernelSU-Next
+     #   id: ksu_version
+     #   run: |
+     #     cd kernel_workspace
+     #     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
       
-      - name: 添加 KernelSU-Next 配置项
-        run: |
-          cd kernel_workspace
-          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+      #- name: 添加 KernelSU-Next 配置项
+      #  run: |
+      #    cd kernel_workspace
+      #    echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
 
       
       - name: 添加制作名称
@@ -117,7 +117,7 @@ jobs:
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
           cp ../out/arch/arm64/boot/Image ./Image
-          zip -r ../AnyKernel3_xiaomi_diting_ksunext.zip ./*
+          zip -r ../AnyKernel3_xiaomi_diting.zip ./*
       
       - name: 上传 ZIP 工件
         uses: actions/upload-artifact@v4
