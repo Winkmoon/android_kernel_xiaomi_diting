@@ -23,6 +23,15 @@ typedef uint64_t U64;
 #define DWORD_BITS 64
 #define BYTE_MAX 255
 
+/*
+ * lz4k_oplus working-memory requirement: a hash table of 2^HT_LOG2 u16
+ * entries, i.e. 2^(HT_LOG2+1) bytes.  Shared by lz4k_compress() (which
+ * zeroes and fills the table) and the crypto wrapper (which vmalloc()s it)
+ * so the two can no longer drift apart.
+ */
+#define LZ4K_OPLUS_HT_LOG2 12
+#define LZ4K_OPLUS_STATE_BYTES (1U << (LZ4K_OPLUS_HT_LOG2 + 1))
+
 #if (defined(__GNUC__) && (__GNUC__ >= 3)) || (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 800)) || defined(__clang__)
 #  define expect(expr,value)    (__builtin_expect ((expr),(value)) )
 #else

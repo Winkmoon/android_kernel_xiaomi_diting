@@ -1835,6 +1835,13 @@ config CRYPTO_LZ4KD
 	help
 	  LZ4KD compression algorithm
 
+config CRYPTO_LZ4K_OPLUS
+	tristate "LZ4K_OPLUS"
+	select CRYPTO_ALGAPI
+	select CRYPTO_ACOMP2
+	help
+	  LZ4K_OPLUS compression algorithm
+
 config CRYPTO_LZ4HC
 	tristate "LZ4HC compression algorithm"
 	select CRYPTO_ALGAPI

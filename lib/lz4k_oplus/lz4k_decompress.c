@@ -201,12 +201,16 @@ static int decompress(
 		/* get literal length and decompress */
 		if (unlikely(lit_length == mask(lit_log2))) {
 			source_at = get_size(&lit_length, source_at, source_end);
+			if (unlikely(source_at == NULL))
+				return -1;
 		}
 		if (!literal_decompress(&source_at, &dest_at, lit_length, source_end, dest_end))
 			return -1;
 		/* get match length and decompress */
 		if (unlikely(match_length == mask(match_log2) + REPEAT_MIN)) {
 			source_at = get_size(&match_length, source_at, source_end);
+			if (unlikely(source_at == NULL))
+				return -1;
 		}
 		dest_from = dest_at - offset;
 		if (unlikely(dest_from < dest))

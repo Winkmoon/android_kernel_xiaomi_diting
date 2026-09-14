@@ -58,7 +58,7 @@ inline static uint64_t mask64(uint_fast32_t log2)
 inline static int most_significant_bit_of(uint64_t u)
 {
 	return (int)(__builtin_expect((u) == 0, false) ?
-		     -1 : (int)((WORD_BITS - 1) ^ (uint32_t)__builtin_clz((unsigned)(u))));
+		     -1 : (int)((WORD_BITS - 1) ^ (uint32_t)__builtin_clzll((unsigned long long)(u))));
 }
 #else /* #!defined LZ4K_WITH_GCC_INTRINSICS */
 #error undefined most_significant_bit_of(unsigned u)

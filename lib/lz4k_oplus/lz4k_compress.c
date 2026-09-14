@@ -2,7 +2,7 @@
 
 #define NR_COPY_LOG2 4
 #define NR_COPY_MIN (1 << NR_COPY_LOG2)
-#define HT_LOG2 12
+#define HT_LOG2 LZ4K_OPLUS_HT_LOG2
 #define STEP_LOG2 5
 
 
@@ -274,7 +274,12 @@ int lz4k_compress(
 	unsigned source_max,
 	unsigned dest_max)
 {
-	m_set(state, 0, 1U << (HT_LOG2+1));
+	if (unlikely(state == NULL || source == NULL || dest == NULL))
+		return -1;
+	if (unlikely(source_max == 0 || dest_max == 0))
+		return -1;
+
+	m_set(state, 0, LZ4K_OPLUS_STATE_BYTES);
 	*((BYTE*)dest) = 0;
 	return compress_64k((U16*)state, (const BYTE*)source,
 			(const BYTE*)source + source_max, (BYTE*)dest, (BYTE*)dest + dest_max);
