@@ -76,14 +76,17 @@ jobs:
           sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
           done
       
-      - name: 集成SukiSU
+      - name: 集成ReSukiSU
         id: ksu_version
         run: |
           cd kernel_workspace/common
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
-          echo "CONFIG_KPM=n" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_TOOLKIT_SUPPORT=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
 
+          
       - name: 开启BBG基带守护
         if: ${{ env.ENABLE_BBG == 'true' }}
         run: |
