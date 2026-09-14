@@ -30,6 +30,13 @@ ldflags-y := -shared -nostdlib -soname=linux-vdso.so.1 --hash-style=sysv	\
 ccflags-y := -fno-common -fno-builtin -fno-stack-protector -ffixed-x18
 ccflags-y += -DDISABLE_BRANCH_PROFILING -DBUILD_VDSO
 
+# The vDSO entry points (__kernel_clock_gettime, __kernel_gettimeofday,
+# __kernel_clock_getres) are deliberately not declared anywhere in the kernel
+# - they are only exported through the vDSO image.  -Wmissing-prototypes
+# (enabled by W=1) therefore has nothing to match and, with CONFIG_WERROR=y,
+# breaks the build.  This is freestanding code by design.
+ccflags-y += -Wno-missing-prototypes
+
 CFLAGS_REMOVE_vgettimeofday.o = $(CC_FLAGS_FTRACE) -Os $(CC_FLAGS_SCS) $(GCC_PLUGINS_CFLAGS) \
 				$(CC_FLAGS_LTO)
 KASAN_SANITIZE			:= n
