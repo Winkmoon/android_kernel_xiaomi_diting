@@ -291,21 +291,10 @@ static ssize_t mem_used_max_store(struct device *dev,
 	return len;
 }
 
-static ssize_t idle_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t len)
+static void zram_mark_all_idle(struct zram *zram)
 {
-	struct zram *zram = dev_to_zram(dev);
 	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
-	int index;
-
-	if (!sysfs_streq(buf, "all"))
-		return -EINVAL;
-
-	down_read(&zram->init_lock);
-	if (!init_done(zram)) {
-		up_read(&zram->init_lock);
-		return -EINVAL;
-	}
+	unsigned long index;
 
 	for (index = 0; index < nr_pages; index++) {
 		/*
@@ -318,6 +307,23 @@ static ssize_t idle_store(struct device *dev,
 			zram_set_flag(zram, index, ZRAM_IDLE);
 		zram_slot_unlock(zram, index);
 	}
+}
+
+static ssize_t idle_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	struct zram *zram = dev_to_zram(dev);
+
+	if (!sysfs_streq(buf, "all"))
+		return -EINVAL;
+
+	down_read(&zram->init_lock);
+	if (!init_done(zram)) {
+		up_read(&zram->init_lock);
+		return -EINVAL;
+	}
+
+	zram_mark_all_idle(zram);
 
 	up_read(&zram->init_lock);
 
@@ -633,51 +639,23 @@ static int read_from_bdev_async(struct zram *zram, struct bio_vec *bvec,
 #define IDLE_WRITEBACK 2
 
 
-static ssize_t writeback_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t len)
+/*
+ * Write back @nr_pages slots starting at @index according to @mode.  The
+ * caller must hold zram->init_lock for reading and the device must have a
+ * backing device.  Returns 0 on success, or a negative errno.
+ */
+static int zram_writeback(struct zram *zram, int mode,
+		unsigned long index, unsigned long nr_pages)
 {
-	struct zram *zram = dev_to_zram(dev);
-	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
-	unsigned long index = 0;
 	struct bio bio;
 	struct bio_vec bio_vec;
 	struct page *page;
-	ssize_t ret = len;
-	int mode, err;
 	unsigned long blk_idx = 0;
-
-	if (sysfs_streq(buf, "idle"))
-		mode = IDLE_WRITEBACK;
-	else if (sysfs_streq(buf, "huge"))
-		mode = HUGE_WRITEBACK;
-	else {
-		if (strncmp(buf, PAGE_WB_SIG, sizeof(PAGE_WB_SIG) - 1))
-			return -EINVAL;
-
-		if (kstrtol(buf + sizeof(PAGE_WB_SIG) - 1, 10, &index) ||
-				index >= nr_pages)
-			return -EINVAL;
-
-		nr_pages = 1;
-		mode = PAGE_WRITEBACK;
-	}
-
-	down_read(&zram->init_lock);
-	if (!init_done(zram)) {
-		ret = -EINVAL;
-		goto release_init_lock;
-	}
-
-	if (!zram->backing_dev) {
-		ret = -ENODEV;
-		goto release_init_lock;
-	}
+	int err, ret = 0;
 
 	page = alloc_page(GFP_KERNEL);
-	if (!page) {
-		ret = -ENOMEM;
-		goto release_init_lock;
-	}
+	if (!page)
+		return -ENOMEM;
 
 	for (; nr_pages != 0; index++, nr_pages--) {
 		struct bio_vec bvec;
@@ -793,11 +771,103 @@ next:
 	if (blk_idx)
 		free_block_bdev(zram, blk_idx);
 	__free_page(page);
+
+	return ret;
+}
+
+static ssize_t writeback_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	struct zram *zram = dev_to_zram(dev);
+	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
+	unsigned long index = 0;
+	ssize_t ret;
+	int mode;
+
+	if (sysfs_streq(buf, "idle"))
+		mode = IDLE_WRITEBACK;
+	else if (sysfs_streq(buf, "huge"))
+		mode = HUGE_WRITEBACK;
+	else {
+		if (strncmp(buf, PAGE_WB_SIG, sizeof(PAGE_WB_SIG) - 1))
+			return -EINVAL;
+
+		if (kstrtol(buf + sizeof(PAGE_WB_SIG) - 1, 10, &index) ||
+				index >= nr_pages)
+			return -EINVAL;
+
+		nr_pages = 1;
+		mode = PAGE_WRITEBACK;
+	}
+
+	down_read(&zram->init_lock);
+	if (!init_done(zram)) {
+		ret = -EINVAL;
+		goto release_init_lock;
+	}
+
+	if (!zram->backing_dev) {
+		ret = -ENODEV;
+		goto release_init_lock;
+	}
+
+	ret = zram_writeback(zram, mode, index, nr_pages);
+	if (ret == 0)
+		ret = len;
+
 release_init_lock:
 	up_read(&zram->init_lock);
 
 	return ret;
 }
+
+#ifdef CONFIG_ZRAM_RECLAIM
+/*
+ * Kernel-side cold-page reclaimer.  No userspace involvement whatsoever.
+ *
+ * Every ZRAM_RECLAIM_INTERVAL_MS it offloads the slots that have stayed
+ * untouched since the previous round, then starts a new aging window by
+ * marking every slot idle.  The bvec read/write paths clear ZRAM_IDLE on
+ * access, so a slot that is still idle at the end of a window is genuinely
+ * cold and is the only thing written out.
+ */
+static void zram_reclaim_work(struct work_struct *work)
+{
+	struct zram *zram = container_of(to_delayed_work(work),
+					struct zram, reclaim_work);
+	u64 used;
+
+	down_read(&zram->init_lock);
+
+	/* Nothing to offload to: stop for good (a re-init restarts us). */
+	if (!init_done(zram) || !zram->backing_dev) {
+		up_read(&zram->init_lock);
+		return;
+	}
+
+	used = (u64)zs_get_total_pages(zram->mem_pool) << PAGE_SHIFT;
+	if (used >= (u64)CONFIG_ZRAM_RECLAIM_THRESHOLD_MB << 20) {
+		/*
+		 * Bound what a single round may push out; otherwise the first
+		 * round could dump most of the device to the backing store.
+		 */
+		spin_lock(&zram->wb_limit_lock);
+		zram->wb_limit_enable = true;
+		zram->bd_wb_limit =
+			(u64)CONFIG_ZRAM_RECLAIM_LIMIT_MB << (20 - 12);
+		spin_unlock(&zram->wb_limit_lock);
+
+		(void)zram_writeback(zram, IDLE_WRITEBACK, 0,
+					zram->disksize >> PAGE_SHIFT);
+	}
+
+	zram_mark_all_idle(zram);
+	up_read(&zram->init_lock);
+
+	schedule_delayed_work(&zram->reclaim_work,
+			msecs_to_jiffies(CONFIG_ZRAM_RECLAIM_INTERVAL_MS));
+}
+#endif /* CONFIG_ZRAM_RECLAIM */
 
 struct zram_work {
 	struct work_struct work;
@@ -1707,6 +1777,14 @@ static void zram_reset_device(struct zram *zram)
 	struct zcomp *comp;
 	u64 disksize;
 
+	/*
+	 * Must happen before taking init_lock: the reclaim worker takes it
+	 * for reading, and cancel_delayed_work_sync() waits for the worker.
+	 */
+#ifdef CONFIG_ZRAM_RECLAIM
+	cancel_delayed_work_sync(&zram->reclaim_work);
+#endif
+
 	down_write(&zram->init_lock);
 
 	zram->limit_pages = 0;
@@ -1770,6 +1848,11 @@ static ssize_t disksize_store(struct device *dev,
 
 	revalidate_disk_size(zram->disk, true);
 	up_write(&zram->init_lock);
+
+#ifdef CONFIG_ZRAM_RECLAIM
+	schedule_delayed_work(&zram->reclaim_work,
+			msecs_to_jiffies(CONFIG_ZRAM_RECLAIM_INTERVAL_MS));
+#endif
 
 	return len;
 
@@ -1927,6 +2010,9 @@ static int zram_add(void)
 	init_rwsem(&zram->init_lock);
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spin_lock_init(&zram->wb_limit_lock);
+#ifdef CONFIG_ZRAM_RECLAIM
+	INIT_DELAYED_WORK(&zram->reclaim_work, zram_reclaim_work);
+#endif
 #endif
 	queue = blk_alloc_queue(NUMA_NO_NODE);
 	if (!queue) {

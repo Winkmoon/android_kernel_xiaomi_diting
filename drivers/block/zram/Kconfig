@@ -88,6 +88,45 @@ config ZRAM_WRITEBACK
 
 	 See Documentation/admin-guide/blockdev/zram.rst for more information.
 
+config ZRAM_RECLAIM
+	bool "Periodically reclaim cold pages of zram (kernel-side)"
+	depends on ZRAM_WRITEBACK
+	default n
+	help
+	 Periodically write back the pages of a zram device that have not
+	 been accessed for a whole interval, so the RAM consumed by zram is
+	 bounded.  This is entirely kernel-side: a delayed work item marks
+	 every slot idle, then offloads the slots that stayed untouched (the
+	 I/O paths clear the idle bit on access).  No userspace daemon, no
+	 script and no sysfs knob is involved.
+
+	 This needs a backing device configured before the size is set (for
+	 example from the device's fstab), see ZRAM_WRITEBACK above.
+
+config ZRAM_RECLAIM_INTERVAL_MS
+	int "zram reclaim interval / idle aging window (ms)"
+	depends on ZRAM_RECLAIM
+	default 300000
+	help
+	 How often the reclaim worker runs and, at the same time, how long a
+	 page must stay untouched before it counts as cold.
+
+config ZRAM_RECLAIM_THRESHOLD_MB
+	int "zram reclaim only above this zram usage (MB, 0 = always)"
+	depends on ZRAM_RECLAIM
+	default 0
+	help
+	 Only start offloading once the zram device uses at least this many
+	 MB.  Zero means reclaim on every interval.
+
+config ZRAM_RECLAIM_LIMIT_MB
+	int "maximum offloaded per reclaim round (MB)"
+	depends on ZRAM_RECLAIM
+	default 64
+	help
+	 Upper bound on how much a single reclaim round may write to the
+	 backing device, so one round cannot dump the whole device at once.
+
 config ZRAM_MEMORY_TRACKING
 	bool "Track zRam block status"
 	depends on ZRAM && DEBUG_FS

@@ -121,6 +121,14 @@ struct zram {
 	unsigned int old_block_size;
 	unsigned long *bitmap;
 	unsigned long nr_pages;
+#ifdef CONFIG_ZRAM_RECLAIM
+	/*
+	 * Cold-page reclaim: a kernel-side timer offloads the slots that
+	 * stayed untouched for a whole ZRAM_RECLAIM_INTERVAL_MS.  No userspace
+	 * involvement.
+	 */
+	struct delayed_work reclaim_work;
+#endif
 #endif
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 	struct dentry *debugfs_dir;
