@@ -39,6 +39,15 @@ struct kernfs_open_node {
 	struct list_head	files; /* goes through kernfs_open_file.list */
 };
 
+static struct kmem_cache *kmem_open_node_pool;
+static struct kmem_cache *kmem_open_file_pool;
+
+void __init init_kernfs_file_pool(void)
+{
+	kmem_open_node_pool = KMEM_CACHE(kernfs_open_node, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+	kmem_open_file_pool = KMEM_CACHE(kernfs_open_file, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+}
+
 /*
  * kernfs_notify() may be called from any context and bounces notifications
  * through a work item.  To minimize space overhead in kernfs_node, the
@@ -549,12 +558,13 @@ static int kernfs_get_open_node(struct kernfs_node *kn,
 	mutex_unlock(&kernfs_open_file_mutex);
 
 	if (on) {
-		kfree(new_on);
+		if (new_on)
+			kmem_cache_free(kmem_open_node_pool, new_on);
 		return 0;
 	}
 
 	/* not there, initialize a new one and retry */
-	new_on = kmalloc(sizeof(*new_on), GFP_KERNEL);
+	new_on = kmem_cache_alloc(kmem_open_node_pool, GFP_KERNEL);
 	if (!new_on)
 		return -ENOMEM;
 
@@ -596,7 +606,8 @@ static void kernfs_put_open_node(struct kernfs_node *kn,
 	spin_unlock_irqrestore(&kernfs_open_node_lock, flags);
 	mutex_unlock(&kernfs_open_file_mutex);
 
-	kfree(on);
+	if (on)
+		kmem_cache_free(kmem_open_node_pool, on);
 }
 
 static int kernfs_fop_open(struct inode *inode, struct file *file)
@@ -630,7 +641,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 
 	/* allocate a kernfs_open_file for the file */
 	error = -ENOMEM;
-	of = kzalloc(sizeof(struct kernfs_open_file), GFP_KERNEL);
+	of = kmem_cache_zalloc(kmem_open_file_pool, GFP_KERNEL);
 	if (!of)
 		goto err_out;
 
@@ -721,7 +732,7 @@ err_seq_release:
 	seq_release(inode, file);
 err_free:
 	kfree(of->prealloc_buf);
-	kfree(of);
+	kmem_cache_free(kmem_open_file_pool, of);
 err_out:
 	kernfs_put_active(kn);
 	return error;
@@ -765,7 +776,8 @@ static int kernfs_fop_release(struct inode *inode, struct file *filp)
 	kernfs_put_open_node(kn, of);
 	seq_release(inode, filp);
 	kfree(of->prealloc_buf);
-	kfree(of);
+	if (of)
+		kmem_cache_free(kmem_open_file_pool, of);
 
 	return 0;
 }
@@ -852,6 +864,7 @@ static void kernfs_notify_workfn(struct work_struct *work)
 {
 	struct kernfs_node *kn;
 	struct kernfs_super_info *info;
+	struct kernfs_root *root;
 repeat:
 	/* pop one off the notify_list */
 	spin_lock_irq(&kernfs_notify_lock);
@@ -864,8 +877,9 @@ repeat:
 	kn->attr.notify_next = NULL;
 	spin_unlock_irq(&kernfs_notify_lock);
 
+	root = kernfs_root(kn);
 	/* kick fsnotify */
-	mutex_lock(&kernfs_mutex);
+	down_write(kernfs_rwsem(root));
 
 	list_for_each_entry(info, &kernfs_root(kn)->supers, node) {
 		struct kernfs_node *parent;
@@ -903,7 +917,7 @@ repeat:
 		iput(inode);
 	}
 
-	mutex_unlock(&kernfs_mutex);
+	up_write(kernfs_rwsem(root));
 	kernfs_put(kn);
 	goto repeat;
 }

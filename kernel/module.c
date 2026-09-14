@@ -1346,6 +1346,8 @@ static int check_version(const struct load_info *info,
 	return 1;
 
 bad_version:
+	pr_warn("%s: disagrees about version of symbol %s, but ignore...\n",
+	       info->name, symname);
 	return 1;
 }
 
@@ -3567,6 +3569,9 @@ static char *custom_module_blacklist[] = {
 #if IS_BUILTIN(CONFIG_ZSMALLOC)
     "zsmalloc", "oplus_bsp_zsmalloc",
 #endif
+#if IS_BUILTIN(CONFIG_MQ_IOSCHED_ADIOS)
+    "adios",
+#endif
 };
 
 static bool blacklisted(const char *module_name)
@@ -3585,7 +3590,7 @@ static bool blacklisted(const char *module_name)
 		if (p[len] == ',')
 			len++;
 	}
-	
+
 custom_blacklist:
 	for (i = 0; i < ARRAY_SIZE(custom_module_blacklist); i++)
 		if (!strcmp(module_name, custom_module_blacklist[i]))
