@@ -111,14 +111,6 @@ config ZRAM_RECLAIM_INTERVAL_MS
 	 How often the reclaim worker runs and, at the same time, how long a
 	 page must stay untouched before it counts as cold.
 
-config ZRAM_RECLAIM_THRESHOLD_MB
-	int "zram reclaim only above this zram usage (MB, 0 = always)"
-	depends on ZRAM_RECLAIM
-	default 0
-	help
-	 Only start offloading once the zram device uses at least this many
-	 MB.  Zero means reclaim on every interval.
-
 config ZRAM_RECLAIM_LIMIT_MB
 	int "maximum offloaded per reclaim round (MB)"
 	depends on ZRAM_RECLAIM
@@ -126,6 +118,17 @@ config ZRAM_RECLAIM_LIMIT_MB
 	help
 	 Upper bound on how much a single reclaim round may write to the
 	 backing device, so one round cannot dump the whole device at once.
+
+config ZRAM_RECLAIM_WATERMARK_MB
+	int "zram reclaim available-memory watermark (MB, 0 = no writeback)"
+	depends on ZRAM_RECLAIM
+	default 0
+	help
+	 Cold pages are only moved to the backing device while the system has
+	 less than this much available memory.  Handing fragmented zspages
+	 back to the page allocator (i.e. reclaiming physical memory) happens
+	 every round regardless.  Zero disables writeback completely, so only
+	 physical memory is reclaimed.
 
 config ZRAM_MEMORY_TRACKING
 	bool "Track zRam block status"

@@ -24,6 +24,7 @@
 #include <linux/device.h>
 #include <linux/genhd.h>
 #include <linux/highmem.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/backing-dev.h>
 #include <linux/string.h>
@@ -835,18 +836,24 @@ static void zram_reclaim_work(struct work_struct *work)
 {
 	struct zram *zram = container_of(to_delayed_work(work),
 					struct zram, reclaim_work);
-	u64 used;
-
 	down_read(&zram->init_lock);
 
-	/* Nothing to offload to: stop for good (a re-init restarts us). */
-	if (!init_done(zram) || !zram->backing_dev) {
-		up_read(&zram->init_lock);
-		return;
-	}
+	if (!init_done(zram))
+		goto out;
 
-	used = (u64)zs_get_total_pages(zram->mem_pool) << PAGE_SHIFT;
-	if (used >= (u64)CONFIG_ZRAM_RECLAIM_THRESHOLD_MB << 20) {
+	/*
+	 * Fragmented zspages are handed back to the page allocator first: that
+	 * reclaims physical memory without touching the backing store at all.
+	 */
+	zs_compact(zram->mem_pool);
+
+	/*
+	 * Only push cold pages out once the system is actually short on
+	 * memory; while there is headroom the backing store is left alone.
+	 * A watermark of 0 disables writeback (compaction only).
+	 */
+	if (zram->backing_dev &&
+	    si_mem_available() < ((long)CONFIG_ZRAM_RECLAIM_WATERMARK_MB << 20) / PAGE_SIZE) {
 		/*
 		 * Bound what a single round may push out; otherwise the first
 		 * round could dump most of the device to the backing store.
@@ -861,7 +868,10 @@ static void zram_reclaim_work(struct work_struct *work)
 					zram->disksize >> PAGE_SHIFT);
 	}
 
+	/* Start the next ageing window. */
 	zram_mark_all_idle(zram);
+
+out:
 	up_read(&zram->init_lock);
 
 	schedule_delayed_work(&zram->reclaim_work,
