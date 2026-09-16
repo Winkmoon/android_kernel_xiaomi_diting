@@ -1,6 +1,6 @@
 # diting 设备维护笔记
 
-适用：`android_kernel_xiaomi_diting`（小米 K50 至尊版 / diting，GKI android12-5.10）
+适用：`android_kernel_xiaomi_diting`（红米 K50 至尊版 / diting，GKI android12-5.10）
 
 ## 一、上游合并的规矩
 
