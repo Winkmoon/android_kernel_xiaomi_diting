@@ -27,7 +27,13 @@
  * condition.  Refer to below descriptions for the watermarks parameter for
  * this.
  */
-static bool enabled __read_mostly;
+/*
+ * Experiment: default it on.  The watermarks below still gate the actual
+ * work - nothing runs while free memory is above wmarks_high and it stops
+ * below wmarks_low - so while there is headroom the only cost is the
+ * sampling.  Userspace can still flip it through the parameter.
+ */
+static bool enabled __read_mostly = true;
 
 /*
  * Time threshold for cold memory regions identification in microseconds.
