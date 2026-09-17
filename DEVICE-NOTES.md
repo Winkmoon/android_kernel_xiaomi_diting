@@ -78,3 +78,34 @@ HiSilicon 的中断控制器、**不在 diting 上**，`of: property` 仅是返�
 - `BLK_WBT` 开着也可能**空转**：看 `/sys/block/*/queue/wbt_lat_usec`，为 `0` 就是没在限流。
 - 配置项的**默认值**也算数：defconfig 里没写的项按 Kconfig 的 `default` 生效
   （ADIOS 就是这样一直出模块的；改成 `=y` 反而会常驻内存）。
+
+## 四、zram 算法矩阵，以及"重压缩"为什么搬不进来
+
+### 当前可用的压缩后端（都已编译进去，可运行时切换）
+
+    cat  /sys/block/zram0/comp_algorithm          # 列出可用算法，当前项带 []
+    echo zstd > /sys/block/zram0/comp_algorithm   # 换算法（需设备未初始化/reset 后）
+
+lz4 / lz4hc / lzo / lzo-rle / zstd / deflate / 842，
+外加本树移植的三个厂商算法 **lz4k / lz4kd / lz4k_oplus**。
+默认是 `CONFIG_ZRAM_DEF_COMP="lz4"`。
+
+### 上游的 recompression（多算法共存）为什么搬不进来
+
+上游自 6.6 起有 recompression（即后来的 `ZRAM_MULTI_COMP`：`recomp_algorithm` +
+按优先级用二级算法再压冷页）。**它无法直接移植到本树**：
+
+1. 那套代码建立在 zram 的 **blk-mq 化**之上（6.6 用 `blk_alloc_disk()`、
+   `zram_bio_read/write()`、`zram_read_from_zspool()` 等），而本树是 **bio-based**
+   （`alloc_disk(1)`）——整文件移植等于连 blk-mq 化一起搬，I/O 路径和 ssg 调度器都会变 ✗
+2. 它还依赖 zsmalloc 的 **zspage class API**（`zs_lookup_class_index()`，5.15+），
+   本树 5.10 的 zsmalloc 没有 ✗
+3. 需要的 block API 本树也缺：`blk_alloc_disk` / `memcpy_{from,to}_bvec` /
+   `bio_advance_iter_single` / `set_capacity_and_notify` ✗
+
+### 可行的替代（自实现精简版）
+
+在本树 bio-based zram 上自己做一个：加一个二级 `struct zcomp`（`recomp_algorithm` 可写），
+在回收 worker 里对 **IDLE 且压缩后仍偏大**的页执行"读回 → 二级算法再压 → 明显更小才换
+handle"，用 `comp_len` 比较替代 `zs_lookup_class_index()`。配置开关默认关闭，
+整颗可以用 `git revert` 撤掉。
