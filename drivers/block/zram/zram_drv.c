@@ -292,20 +292,34 @@ static ssize_t mem_used_max_store(struct device *dev,
 	return len;
 }
 
-static void zram_mark_all_idle(struct zram *zram)
+/*
+ * Mark pages which have not been accessed since @cutoff as IDLE.  A cutoff of
+ * 0 marks everything, which is the "all" behaviour and also what is used when
+ * CONFIG_ZRAM_MEMORY_TRACKING is off (there is no access time to compare
+ * against then).  Callers must hold zram->init_lock for reading.
+ */
+static void zram_mark_idle(struct zram *zram, ktime_t cutoff)
 {
 	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
 	unsigned long index;
 
 	for (index = 0; index < nr_pages; index++) {
+		bool is_idle = true;
+
 		/*
 		 * Do not mark ZRAM_UNDER_WB slot as ZRAM_IDLE to close race.
 		 * See the comment in writeback_store.
 		 */
 		zram_slot_lock(zram, index);
 		if (zram_allocated(zram, index) &&
-				!zram_test_flag(zram, index, ZRAM_UNDER_WB))
-			zram_set_flag(zram, index, ZRAM_IDLE);
+				!zram_test_flag(zram, index, ZRAM_UNDER_WB)) {
+#ifdef CONFIG_ZRAM_MEMORY_TRACKING
+			is_idle = !cutoff ||
+				ktime_after(cutoff, zram->table[index].ac_time);
+#endif
+			if (is_idle)
+				zram_set_flag(zram, index, ZRAM_IDLE);
+		}
 		zram_slot_unlock(zram, index);
 	}
 }
@@ -314,21 +328,39 @@ static ssize_t idle_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
 	struct zram *zram = dev_to_zram(dev);
+	ktime_t cutoff_time = 0;
+	ssize_t rv = -EINVAL;
 
-	if (!sysfs_streq(buf, "all"))
-		return -EINVAL;
+	if (!sysfs_streq(buf, "all")) {
+		/*
+		 * If it did not parse as 'all' try to treat it as an integer
+		 * when we have memory tracking enabled.
+		 */
+		u64 age_sec;
 
-	down_read(&zram->init_lock);
-	if (!init_done(zram)) {
-		up_read(&zram->init_lock);
-		return -EINVAL;
+		if (IS_ENABLED(CONFIG_ZRAM_MEMORY_TRACKING) &&
+				!kstrtoull(buf, 0, &age_sec))
+			cutoff_time = ktime_sub(ktime_get_boottime(),
+					ns_to_ktime(age_sec * NSEC_PER_SEC));
+		else
+			goto out;
 	}
 
-	zram_mark_all_idle(zram);
+	down_read(&zram->init_lock);
+	if (!init_done(zram))
+		goto out_unlock;
 
+	/*
+	 * A cutoff_time of 0 marks everything as idle, this is the
+	 * "all" behavior.
+	 */
+	zram_mark_idle(zram, cutoff_time);
+	rv = len;
+
+out_unlock:
 	up_read(&zram->init_lock);
-
-	return len;
+out:
+	return rv;
 }
 
 #ifdef CONFIG_ZRAM_WRITEBACK
@@ -869,7 +901,7 @@ static void zram_reclaim_work(struct work_struct *work)
 	}
 
 	/* Start the next ageing window. */
-	zram_mark_all_idle(zram);
+	zram_mark_idle(zram, 0);
 
 out:
 	up_read(&zram->init_lock);
