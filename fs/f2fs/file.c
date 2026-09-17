@@ -22,6 +22,12 @@
 #include <linux/file.h>
 #include <linux/nls.h>
 #include <linux/sched/signal.h>
+/*
+ * POSIX_FADV_* for f2fs_file_fadvise().  Upstream pulls these in through
+ * <linux/fadvise.h>, which this tree does not have, so include the uapi
+ * header directly.
+ */
+#include <uapi/linux/fadvise.h>
 
 #include "f2fs.h"
 #include "node.h"
