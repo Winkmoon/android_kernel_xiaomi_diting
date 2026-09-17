@@ -3540,6 +3540,7 @@ static void init_sb_info(struct f2fs_sb_info *sbi)
 	sbi->migration_granularity = sbi->segs_per_sec;
 
 	sbi->dir_level = DEF_DIR_LEVEL;
+	sbi->seq_file_ra_mul = MIN_RA_MUL;
 	sbi->interval_time[CP_TIME] = DEF_CP_INTERVAL;
 	sbi->interval_time[REQ_TIME] = DEF_IDLE_INTERVAL;
 	sbi->interval_time[DISCARD_TIME] = DEF_IDLE_INTERVAL;

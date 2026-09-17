@@ -572,6 +572,8 @@ enum {
 #define F2FS_LINK_MAX	0xffffffff	/* maximum link count per file */
 
 #define MAX_DIR_RA_PAGES	4	/* maximum ra pages of dir */
+#define MIN_RA_MUL		2	/* minimum multiplier of readahead */
+#define MAX_RA_MUL		256	/* maximum multiplier of readahead */
 
 /* for in-memory extent cache entry */
 #define F2FS_MIN_EXTENT_LEN	64	/* minimum extent length */
@@ -1632,6 +1634,7 @@ struct f2fs_sb_info {
 	unsigned int hot_data_age_threshold;
 	unsigned int warm_data_age_threshold;
 	unsigned int last_age_weight;
+	unsigned int seq_file_ra_mul;	/* multiplier for ra_pages of seq. files in fadvise */
 
 	/* basic filesystem units */
 	unsigned int log_sectors_per_block;	/* log2 sectors per block */
