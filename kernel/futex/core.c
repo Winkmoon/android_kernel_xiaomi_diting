@@ -4395,4 +4395,3 @@ destroy_timer:
 	}
 	return ret;
 }
-
