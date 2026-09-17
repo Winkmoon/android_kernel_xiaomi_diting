@@ -864,6 +864,9 @@ __SC_COMP(__NR_epoll_pwait2, sys_epoll_pwait2, compat_sys_epoll_pwait2)
 #define __NR_process_mrelease 448
 __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
 
+#define __NR_futex_waitv 449
+__SYSCALL(__NR_futex_waitv, sys_futex_waitv)
+
 /*
  * 442-451 stay undefined on purpose: the table is pre-filled with
  * __arm64_sys_ni_syscall, so they return ENOSYS exactly as before.

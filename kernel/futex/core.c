@@ -4100,3 +4100,299 @@ static int __init futex_init(void)
 	return 0;
 }
 core_initcall(futex_init);
+
+/*
+ * futex_waitv(2): wait on a vector of futexes.
+ *
+ * Ported from upstream (the futex2 series, 5.16), adapted to this tree's
+ * naming (queue_lock/unqueue_me/get_futex_value_locked) and to the timer
+ * helpers that exist here.
+ */
+
+/* Flags a single futex_waitv waiter may carry */
+#define FUTEXV_WAITER_MASK (FUTEX_32 | FUTEX_PRIVATE_FLAG)
+
+/*
+ * Auxiliary struct for futex_waitv(2): one waiter plus the futex_q it is
+ * queued through.
+ */
+struct futex_vector {
+	struct futex_waitv w;
+	struct futex_q q;
+};
+
+/*
+ * unqueue_multiple() - Remove a list of queued futexes
+ * @v:     the list
+ * @count: the size of the list
+ *
+ * Return:
+ *  - >=0 - Index of the last futex that was awoken;
+ *  - -1  - No futex was awoken
+ */
+static int unqueue_multiple(struct futex_vector *v, int count)
+{
+	int ret = -1, i;
+
+	for (i = 0; i < count; i++) {
+		if (!unqueue_me(&v[i].q))
+			ret = i;
+	}
+
+	return ret;
+}
+
+/**
+ * futex_wait_multiple_setup() - Prepare to wait and enqueue multiple futexes
+ * @vs:    The futex list to wait on
+ * @count: The size of the list
+ * @woken: Index of the last woken futex, if any. Used to notify the caller
+ *         that it can return this index to userspace (return parameter)
+ *
+ * Return:
+ *  -  1 - One of the futexes was woken by another thread
+ *  -  0 - Success
+ *  - <0 - -EFAULT, -EWOULDBLOCK or -EINVAL
+ */
+static int futex_wait_multiple_setup(struct futex_vector *vs, int count,
+									 int *woken)
+{
+	struct futex_hash_bucket *hb;
+	bool retry = false;
+	int ret, i;
+	u32 uval;
+
+	/*
+	 * Enqueuing multiple futexes is tricky, because we need to enqueue each
+	 * futex on the list before dealing with the next one to avoid deadlocking
+	 * on the hash bucket.  But before enqueuing we need current->state to be
+	 * TASK_INTERRUPTIBLE so we don't lose wake events, and that cannot be done
+	 * before the get_futex_key() of the next key (it can sleep).  So fetch all
+	 * the keys first, then read each value and queue the futex.
+	 */
+retry:
+	for (i = 0; i < count; i++) {
+		if ((vs[i].w.flags & FUTEX_PRIVATE_FLAG) && retry)
+			continue;
+
+		ret = get_futex_key((u32 __user *)(unsigned long)vs[i].w.uaddr,
+							!(vs[i].w.flags & FUTEX_PRIVATE_FLAG),
+							&vs[i].q.key, FUTEX_READ);
+		if (unlikely(ret))
+			return ret;
+	}
+
+	set_current_state(TASK_INTERRUPTIBLE);
+
+	for (i = 0; i < count; i++) {
+		u32 __user *uaddr = (u32 __user *)(unsigned long)vs[i].w.uaddr;
+		struct futex_q *q = &vs[i].q;
+		u32 val = (u32)vs[i].w.val;
+
+		hb = queue_lock(q);
+		ret = get_futex_value_locked(&uval, uaddr);
+
+		if (!ret && uval == val) {
+			/*
+			 * The bucket lock can't be held while dealing with the next
+			 * futex, so queue this one now and let queue_me() drop hb.
+			 */
+			queue_me(q, hb);
+			continue;
+		}
+
+		queue_unlock(hb);
+		__set_current_state(TASK_RUNNING);
+
+		/*
+		 * Even if something went wrong, if we find out that a futex was
+		 * woken, we don't return error and return this index to userspace.
+		 */
+		*woken = unqueue_multiple(vs, i);
+		if (*woken >= 0)
+			return 1;
+
+		if (ret) {
+			/*
+			 * A page fault has to be handled without any lock and without
+			 * any enqueued futex, otherwise a wakeup could be lost.  Undo
+			 * everything first, then retry the whole thing.
+			 */
+			if (get_user(uval, uaddr))
+				return -EFAULT;
+
+			retry = true;
+			goto retry;
+		}
+
+		if (uval != val)
+			return -EWOULDBLOCK;
+	}
+
+	return 0;
+}
+
+/*
+ * futex_sleep_multiple() - Sleep if no futex on the list has been woken up
+ * and the timeout has not expired yet.
+ */
+static void futex_sleep_multiple(struct futex_vector *vs, unsigned int count,
+								 struct hrtimer_sleeper *to)
+{
+	if (to && !to->task)
+		return;
+
+	for (; count; count--, vs++) {
+		if (!READ_ONCE(vs->q.lock_ptr))
+			return;
+	}
+
+	schedule();
+}
+
+/**
+ * futex_wait_multiple() - Prepare to wait on and enqueue several futexes
+ *
+ * Return:
+ *  - >=0 - Hint to the futex that was awoken
+ *  - <0  - On error
+ */
+static int futex_wait_multiple(struct futex_vector *vs, unsigned int count,
+							   struct hrtimer_sleeper *to)
+{
+	int ret, hint = 0;
+
+	if (to && to->task)
+		hrtimer_start_expires(&to->timer, HRTIMER_MODE_ABS);
+
+	while (1) {
+		ret = futex_wait_multiple_setup(vs, count, &hint);
+		if (ret) {
+			if (ret > 0) {
+				/* A futex was woken during setup */
+				ret = hint;
+			}
+			return ret;
+		}
+
+		futex_sleep_multiple(vs, count, to);
+
+		__set_current_state(TASK_RUNNING);
+
+		ret = unqueue_multiple(vs, count);
+		if (ret >= 0)
+			return ret;
+
+		if (to && !to->task)
+			return -ETIMEDOUT;
+		else if (signal_pending(current))
+			return -ERESTARTSYS;
+		/*
+		 * The final case is a spurious wakeup, for which just retry.
+		 */
+	}
+}
+
+/*
+ * futex_parse_waitv() - Parse a waitv array from userspace
+ */
+static int futex_parse_waitv(struct futex_vector *futexv,
+							 struct futex_waitv __user *uwaitv,
+							 unsigned int nr_futexes)
+{
+	struct futex_waitv aux;
+	unsigned int i;
+
+	for (i = 0; i < nr_futexes; i++) {
+		if (copy_from_user(&aux, &uwaitv[i], sizeof(aux)))
+			return -EFAULT;
+
+		if ((aux.flags & ~FUTEXV_WAITER_MASK) || aux.__reserved)
+			return -EINVAL;
+
+		if (!(aux.flags & FUTEX_32))
+			return -EINVAL;
+
+		futexv[i].w.flags = aux.flags;
+		futexv[i].w.val = aux.val;
+		futexv[i].w.uaddr = aux.uaddr;
+		futexv[i].q = futex_q_init;
+	}
+
+	return 0;
+}
+
+/**
+ * sys_futex_waitv() - Wait on a list of futexes
+ * @waiters:    List of futexes to wait on
+ * @nr_futexes: Number of futexes in the list
+ * @flags:      Flags for the syscall, must be 0 for now
+ * @timeout:    Optional absolute timeout (like FUTEX_WAIT_BITSET)
+ * @clockid:    Clock for the timeout: CLOCK_MONOTONIC or CLOCK_REALTIME
+ *
+ * Return:
+ *  - >=0 - Index of the futex that was awoken
+ *  - <0  - On error
+ */
+SYSCALL_DEFINE5(futex_waitv, struct futex_waitv __user *, waiters,
+				unsigned int, nr_futexes, unsigned int, flags,
+				struct __kernel_timespec __user *, timeout, clockid_t, clockid)
+{
+	struct hrtimer_sleeper to;
+	struct futex_vector *futexv;
+	struct timespec64 ts;
+	ktime_t time;
+	int ret;
+
+	/* This syscall supports no flags for now */
+	if (flags)
+		return -EINVAL;
+
+	if (!nr_futexes || nr_futexes > FUTEX_WAITV_MAX || !waiters)
+		return -EINVAL;
+
+	if (timeout) {
+		int flag_clkid = 0, flag_init = 0;
+
+		if (clockid == CLOCK_REALTIME) {
+			flag_clkid = FLAGS_CLOCKRT;
+			flag_init = FUTEX_CLOCK_REALTIME;
+		}
+
+		if (clockid != CLOCK_REALTIME && clockid != CLOCK_MONOTONIC)
+			return -EINVAL;
+
+		if (get_timespec64(&ts, timeout))
+			return -EFAULT;
+
+		/*
+		 * There is no opcode for futex_waitv, and like FUTEX_WAIT_BITSET its
+		 * timeout is absolute for both clocks.
+		 */
+		time = timespec64_to_ktime(ts);
+		if (!(flag_init & FUTEX_CLOCK_REALTIME))
+			time = timens_ktime_to_host(CLOCK_MONOTONIC, time);
+
+		futex_setup_timer(&time, &to, flag_clkid, 0);
+	}
+
+	futexv = kcalloc(nr_futexes, sizeof(*futexv), GFP_KERNEL);
+	if (!futexv) {
+		ret = -ENOMEM;
+		goto destroy_timer;
+	}
+
+	ret = futex_parse_waitv(futexv, waiters, nr_futexes);
+	if (!ret)
+		ret = futex_wait_multiple(futexv, nr_futexes, timeout ? &to : NULL);
+
+	kfree(futexv);
+
+destroy_timer:
+	if (timeout) {
+		hrtimer_cancel(&to.timer);
+		destroy_hrtimer_on_stack(&to.timer);
+	}
+	return ret;
+}
+

@@ -23,6 +23,29 @@
 #define FUTEX_CMP_REQUEUE_PI	12
 
 #define FUTEX_PRIVATE_FLAG	128
+
+/*
+ * Flags for futex_waitv(2).  Only 32bit wide futexes are supported for
+ * now, and FUTEX_PRIVATE_FLAG is accepted per waiter.
+ */
+#define FUTEX_32		2
+
+/* Maximum number of futexes a single futex_waitv(2) call may wait on. */
+#define FUTEX_WAITV_MAX		128
+
+/**
+ * struct futex_waitv - A waiter for vectorized wait
+ * @val:	Expected value at uaddr
+ * @uaddr:	User address to wait on
+ * @flags:	Flags for this waiter
+ * @__reserved:	Reserved member to preserve data alignment. Should be 0.
+ */
+struct futex_waitv {
+	__u64 val;
+	__u64 uaddr;
+	__u32 flags;
+	__u32 __reserved;
+};
 #define FUTEX_CLOCK_REALTIME	256
 #define FUTEX_CMD_MASK		~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME)
 
