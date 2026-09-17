@@ -88,6 +88,28 @@ config ZRAM_WRITEBACK
 
 	 See Documentation/admin-guide/blockdev/zram.rst for more information.
 
+config ZRAM_RECOMP
+	bool "Recompress cold zram pages with a secondary algorithm"
+	depends on ZRAM
+	default n
+	help
+	 Adds a second compression backend which a (cold) page can be
+	 recompressed with when that makes it smaller, so cold pages that
+	 compress badly stop wasting memory.  Pick it through
+	 /sys/block/zramX/recomp_algorithm ("none" disables it again).
+
+	 The work happens in the reclaim worker, which only looks at slots
+	 already marked idle, and a slot is only swapped over when it is
+	 still exactly the page which was examined.
+
+config ZRAM_RECOMP_MIN_LEN
+	int "only recompress pages at or above this compressed size (bytes)"
+	depends on ZRAM_RECOMP
+	default 2048
+	help
+	 Skipping whatever is already small keeps the worker from burning
+	 CPU on pages that have nothing left to gain.
+
 config ZRAM_RECLAIM
 	bool "Periodically reclaim cold pages of zram (kernel-side)"
 	depends on ZRAM_WRITEBACK

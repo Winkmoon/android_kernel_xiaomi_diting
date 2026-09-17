@@ -50,6 +50,7 @@ enum zram_pageflags {
 	ZRAM_UNDER_WB,	/* page is under writeback */
 	ZRAM_HUGE,	/* Incompressible page */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+	ZRAM_RECOMP,	/* stored with the secondary (recompression) algorithm */
 
 	__NR_ZRAM_PAGEFLAGS,
 };
@@ -108,6 +109,11 @@ struct zram {
 	 */
 	u64 disksize;	/* bytes */
 	char compressor[CRYPTO_MAX_ALG_NAME];
+#ifdef CONFIG_ZRAM_RECOMP
+	/* secondary algorithm used to recompress cold pages */
+	struct zcomp *recomp;
+	char recompressor[CRYPTO_MAX_ALG_NAME];
+#endif
 	/*
 	 * zram is claimed so open request will be failed
 	 */
