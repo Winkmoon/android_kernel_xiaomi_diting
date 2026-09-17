@@ -54,3 +54,27 @@ HiSilicon 的中断控制器、**不在 diting 上**，`of: property` 仅是返�
 ### 教训
 `remoteproc` / 平台驱动 API / DT 布局 这三类上游改动，**若第三方撤过，默认先不恢复**
 （容易和厂商 blobs / DSP / DTB 打架）；确实要恢复也必须单独提交 + 真机验证。
+
+## 三、运行时 A/B 与调试（不用重新编译）
+
+### IO 调度器切换
+默认调度器被钉在 `block/elevator.c` 的 `elevator_get_default()`（当前 `ssg`），
+但运行时可以随时换，不需要重新出包：
+
+    for d in /sys/block/sd*; do echo mq-deadline > $d/queue/scheduler; done
+
+可选：`none` / `mq-deadline` / `kyber` / `bfq` / `ssg` / `adios`。
+
+`adios`（Adaptive Deadline I/O scheduler）在 `block/Kconfig.iosched` 里是
+`tristate` + `default m` —— **默认就编成模块**，用之前先 `modprobe adios`。
+
+### DAMON_RECLAIM 做 A/B
+实验分支（`exp`）里默认开着，运行时可随时开关对比：
+
+    echo 0 > /sys/module/damon_reclaim/parameters/enabled
+    echo 1 > /sys/module/damon_reclaim/parameters/enabled
+
+### 两个容易看错的点
+- `BLK_WBT` 开着也可能**空转**：看 `/sys/block/*/queue/wbt_lat_usec`，为 `0` 就是没在限流。
+- 配置项的**默认值**也算数：defconfig 里没写的项按 Kconfig 的 `default` 生效
+  （ADIOS 就是这样一直出模块的；改成 `=y` 反而会常驻内存）。
