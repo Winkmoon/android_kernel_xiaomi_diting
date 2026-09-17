@@ -131,7 +131,8 @@ handle"，用 `comp_len` 比较替代 `zs_lookup_class_index()`。配置开关�
 |---|---|---|---|
 | **KMI generation** | `build.config.common: KMI_GENERATION=9`（本树就是 9） | 决定 `uname` 串里的 `-android12-9-` | 动它 ⇒ **厂商模块直接不兼容**（官方原话）✗ |
 | **`CONFIG_LOCALVERSION`** | defconfig：本树 `"-Xinran_StarBai-Stars"` | 拼进 `uname -r`，**也拼进每个模块的 vermagic** | 改它必须**内核与模块同一次构建**一起刷（现在就是这么做的 ✓） |
-| **`CONFIG_MODULE_SCMVERSION`** | `init/Kconfig:2262`，本树有但没开 | 把 SCM 串塞进模块 vermagic，校验**更严** | ❌ 不要开：只会让模块更难加载 |
+| **`CONFIG_MODULE_SCMVERSION`** | `init/Kconfig:2262`，本树有但没开 | 给模块加一个**可查询属性**（`modinfo -F scmversion` / `/sys/module/*/scmversion`）；实现是 `MODINFO_ATTR(scmversion)`，**不进 vermagic，不影响模块加载** | 官方 GKI 开着；本树**想开也开不了**（它 `depends on LOCALVERSION_AUTO`，而本树故意 `LOCALVERSION_AUTO=n`）|
+| **`CONFIG_LOCALVERSION_AUTO`** | 本树**有意设为 n** | 关掉它 ⇒ vermagic **不含 git hash** | ✅ **保持现关**：这样不同提交编出来的模块仍能互相加载（自用内核的正确取舍）|
 
 **结论：不要伪造版本号。** 假装成 6.x 不会让缺的功能出现，反而立刻破坏模块加载
 （vermagic 不匹配 ⇒ 开不了机）。真正决定"能不能开机"的是三条：
@@ -185,3 +186,25 @@ handle"，用 `comp_len` 比较替代 `zs_lookup_class_index()`。配置开关�
         https://android.googlesource.com/kernel/common ack
     cd ack && git sparse-checkout set arch/arm64/configs include/uapi/asm-generic
     git checkout      # 只取这几个目录，约 15 MB
+
+### 6. 和 **官方同版本线**（android12-5.10 ACK）的对比 —— 最权威的一步
+
+拉官方的 `android12-5.10`（`https://android.googlesource.com/kernel/common`，2026-08 的
+tip，`KMI_GENERATION=9` ✓ 与本树一致）逐项比：
+
+| 对比项 | 结果 |
+|---|---|
+| 系统调用集合 | **完全一致** —— 官方 5.10 线同样**没有** `fchmodat2`/`mseal`/`mount_setattr`/`futex_waitv` 等 ✓✓ ⇒ "这些缺失不影响 Android 17 跑在 5.10 上"**得到官方背书** |
+| `__NR_syscalls` | 官方 **449**；本树 **453**（我加了 `fchmodat2`=452，**超出官方线**，无害但要知情） |
+| 平台相关配置缺口 | 只剩 3 项：`MODULE_SCMVERSION`（见上，不能开也不必要）、`IKHEADERS`（BPF 工具用，会让镜像大几 MB，**不加**）、`ARM64_SW_TTBR0_PAN`（加固项，非开机必需，**不加**） |
+
+**结论：内核侧你这条线已经和官方 5.10 一致了** ✓ —— 缺的那点东西官方也缺 ✓。
+所以"Android 17 能不能跑"的瓶颈**不在内核**，而在 **vendor 分区 / 闭源 HAL 的版本**（VNDK/VINTF）。
+
+### 7. 两小时里改了什么（`exp` 分支）
+
+- `fchmodat2`（新增系统调用 452）—— 唯一一处**超出官方 5.10 线**的加法
+- 11 个配置项（cgroup 控制器 / netfilter / IPv6 组播），依据是 android17-6.18 的官方 gki_defconfig
+- 本说明文档
+- **未改**（刻意）：`CONFIG_LOCALVERSION`、`LOCALVERSION_AUTO`、`MODULE_SCMVERSION`、
+  以及任何需要大改代码的东西（`mseal`/`landlock`/MGLRU/`ANON_VMA_NAME`）
