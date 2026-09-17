@@ -1690,6 +1690,8 @@ struct f2fs_sb_info {
 	struct atgc_management am;		/* atgc management */
 	unsigned int cur_victim_sec;		/* current victim section num */
 	unsigned int gc_mode;			/* current GC state */
+	unsigned int gc_urgent_high_remaining;	/* remaining trial count for GC_URGENT_HIGH */
+	spinlock_t gc_urgent_high_lock;	/* serializes the field above */
 	unsigned int next_victim_seg[2];	/* next segment in victim section */
 
 	/* for skip statistic */
