@@ -208,3 +208,47 @@ tip，`KMI_GENERATION=9` ✓ 与本树一致）逐项比：
 - 本说明文档
 - **未改**（刻意）：`CONFIG_LOCALVERSION`、`LOCALVERSION_AUTO`、`MODULE_SCMVERSION`、
   以及任何需要大改代码的东西（`mseal`/`landlock`/MGLRU/`ANON_VMA_NAME`）
+
+## 六、Android 各版本对内核的正式要求（一手来源）与合规核对
+
+### 要求清单在哪
+
+AOSP 仓库 **`kernel/configs`**（`https://android.googlesource.com/kernel/configs`）：
+
+- 顶层目录按 Android 大版本代号：`r/`=11、`s/`=12、`t/`=13、`u/`=14、`v/`=15、
+  `b/`=16、`c/`=17，另有 `d/`（更新的一档）。
+- 每级下面按内核线分目录 `android-<版本>/`，里面有：
+  - **`android-base.config`** —— 该内核线的**必备配置**，含"必须关闭"的负向项
+  - **`android-base-conditional.xml`** —— **条件要求**（按架构/内核版本；头部
+    `<kernel minlts="5.10.107" />` 就是这条线的最低 LTS）
+- **`kernel-lifetimes.xml`** —— 每条线的 launch / EOL（`android12-5.10` 的 **EOL = 2027-07-01**）
+
+### 各 Android 版本定义了哪些内核要求集（android17-release 分支实测）
+
+| Android 版本 | 要求集 |
+|---|---|
+| 13（`t/`） | `android-5.10` + `android-5.15` ← **5.10 的最后一份** |
+| 14（`u/`） | `android-5.15` + `android-6.1` |
+| 15（`v/`） | `android-6.6` |
+| 16（`b/`） | `android-6.12` |
+| 17（`c/`） | **`android-6.18`（只有它）** |
+
+**⇒ "Android 17 QPR1 起不支持 5.10"的具体含义 = 官方不再为 5.10 定义要求集**
+（因而也不再对它做兼容性测试）。它**不是运行时的拒绝** —— ROM 能不能在 5.10 上跑，
+取决于该 ROM 自己的 vendor 侧与 FCM；QPR 只是给"官方承诺"画上句号。
+
+### 本树的合规核对（用 `t/android-5.10` 那份最终要求集逐项查）
+
+- **正向要求 253 项：缺失 0** ✓
+- **负向要求（必须关闭）：违规 0** ✓
+- ⇒ **本树内核配置与官方对 5.10 的最终要求 100% 一致**
+
+核对中查出并修正的两处偏差（都来自之前那个 "restore the GKI switches" 提交）：
+
+| 项 | 官方要求 | 原厂 defconfig | 曾改成 | 现在 |
+|---|---|---|---|---|
+| `CONFIG_SYSVIPC` | 关闭 | 关闭 | 开 ✗ | 关闭 ✓ |
+| `CONFIG_IP6_NF_NAT`（连带 `_TARGET_MASQUERADE`） | 关闭 | 关闭 | 开 ✗ | 关闭 ✓ |
+
+**教训（重要）**："原厂没开"或"第三方 GKI 开了"**都不能当依据**；
+权威依据只有 `kernel/configs` 里那份要求集。
