@@ -33,7 +33,7 @@
  * below wmarks_low - so while there is headroom the only cost is the
  * sampling.  Userspace can still flip it through the parameter.
  */
-static bool enabled __read_mostly = true;
+static bool enabled __read_mostly = false;
 
 /*
  * Time threshold for cold memory regions identification in microseconds.
