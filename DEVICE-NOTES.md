@@ -335,3 +335,36 @@ Android 12 到 17，官方要求**几乎没变**：
 | BPF `strncmp` / `loop` / `map_lookup_percpu_elem` | 中（要同步 uapi 编号） | 中（涉及 verifier） | 极小 |
 | `BPF_MAP_TYPE_USER_RINGBUF` / `BLOOM_FILTER` | 中（自包含，不影响现有类型） | 中 | 极小 |
 | `mseal` / `mount_setattr` | 大 | 高（动 mm / mount 核心） | 小 |
+
+## 九、为什么"为了让 GKI 对齐"而开 config 会让手机开不了机
+
+### 机制（这次踩的坑）
+
+- 本机打包脚本（`.github/workflows/Built-in.yml`）**只把 `out/arch/arm64/boot/Image` 放进 AnyKernel3**，
+  **一个 `.ko` 都不带** ✗ ⇒ 设备上跑的永远是**原厂/上一版的 vendor 模块**。
+- 内核开了 **`CONFIG_MODVERSIONS=y`** ⇒ 每个导出符号都带 CRC，
+  而 CRC 是**按符号签名（含其中结构体的完整布局）算出来的**。
+- ⇒ **任何会增删"出现在导出符号签名里的结构体成员"的 config 选项**，
+  都会改掉这些符号的 CRC ⇒ **vendor 模块加载失败**（`disagrees about version of symbol`）
+  ⇒ 存储/网络类模块起不来（`ufs_qcom` 等）⇒ `/data` 挂不上 ⇒ **开不了机**。
+
+### 本次实测中招的选项（都在头文件里逐行核实过）
+
+| 选项 | 改到的结构体 |
+|---|---|
+| `CONFIG_BLK_WBT` / `CONFIG_BLK_WBT_MQ` | `struct request`（`blkdev.h:211`，`wbt_flags`）|
+| `CONFIG_BLK_DEV_THROTTLING` | `struct request_queue`（`blkdev.h:576`）|
+| `CONFIG_IPV6_MROUTE` / `_MULTIPLE_TABLES` | `struct netns_ipv6`（`netns/ipv6.h:100`）→ 被 `struct net` 内嵌（`net_namespace.h:128`）|
+| `CONFIG_IPV6_SUBTREES` | `struct fib6_node`（`ip6_fib.h:79`）|
+
+这些**没有一项在官方 5.10 要求集里**，**原厂 defconfig 也都没有** ——
+当初是照着"官方 6.x GKI 有"加的，**参考系选错了** ✗（和 `SYSVIPC`/`IP6_NF_NAT` 那次是同一个错误模式）。
+
+### 结论与纪律
+
+1. **原厂 defconfig 是唯一可信基线**；"GKI/别人的内核有"不是理由。
+2. 想开这类选项的前提是**同时把新编的模块也刷进去**（改 AnyKernel3 打包，
+   把 `out/lib/modules/**/*.ko` 放进 zip 并写到 `/vendor/lib/modules`），
+   否则就只能放弃这些选项。
+3. 反过来，**只动代码、不动这些 config 的改动是安全的**（CRC 不受影响）——
+   5.10.270 合并、调速器、zram/f2fs 代码改动都属于这类 ✓。
