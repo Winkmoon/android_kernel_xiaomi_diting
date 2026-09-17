@@ -312,8 +312,12 @@ Android 12 到 17，官方要求**几乎没变**：
 
 ### 系统调用侧的实现缺口
 
-`futex_waitv`(449)、`mseal`(462)、`mount_setattr`(442)、`landlock_*`、`memfd_secret`
-在本树都**没有实现**。（本树 futex 已经是 `kernel/futex/` 拆分结构，但只有 `core.c`。）
+本树**已经补上**：`fchmodat2`(452) ✓、**`futex_waitv`(449)** ✓（照 5.16 上游的 futex2 系列移植，
+适配本树 `queue_lock`/`unqueue_me`/`get_futex_value_locked` 的命名与超时定时器写法；
+只新增代码路径，不动原有 futex/PI 逻辑）。
+
+**仍未实现**：`mseal`(462)、`mount_setattr`(442)、`landlock_*`、`memfd_secret` 等
+（缺了只回 ENOSYS，Android 都有 fallback）。
 
 ### 结论：该不该补
 
