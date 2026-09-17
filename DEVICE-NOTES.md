@@ -109,3 +109,79 @@ lz4 / lz4hc / lzo / lzo-rle / zstd / deflate / 842，
 在回收 worker 里对 **IDLE 且压缩后仍偏大**的页执行"读回 → 二级算法再压 → 明显更小才换
 handle"，用 `comp_len` 比较替代 `zs_lookup_class_index()`。配置开关默认关闭，
 整颗可以用 `git revert` 撤掉。
+
+## 五、Android 17 与 5.10：官方要求、启动时那个"版本号"、以及本树实测差距
+
+### 1. 官方事实（source.android.com → Android common kernels）
+
+- Android 17(2026) 的支持列表里**仍然列着** android12-5.10 与 android13-5.10，
+  但标注 **"not supported in Android 17 QPR1 or higher"** —— 是**从 QPR1 起**才移除。
+- `android12-5.10` 的 **EOL = 2027-07-01**（6 年支持期），之后不再有安全补丁。
+- **KMI 不跨 GKI 保持兼容**（官方原话：android14-6.1 内核不能直接换 android15-6.6，
+  必须重编全部模块）→ 想换 6.x 内核对这台机器不可行。
+- Android 17 起 **ION 分配器不再支持**；本树 `# CONFIG_ION is not set` ✓ 不受影响。
+- 官方机制：**KMI 冻结后只允许"新增"导出符号**，不动已有接口就不破坏兼容
+  → 所以"加法式"的 backport 才是安全的。
+
+### 2. 启动时读到的"版本号"到底是什么（这就是听说要"动手脚"的地方）
+
+三个层次，千万别混：
+
+| 名字 | 位置 | 作用 | 能不能动 |
+|---|---|---|---|
+| **KMI generation** | `build.config.common: KMI_GENERATION=9`（本树就是 9） | 决定 `uname` 串里的 `-android12-9-` | 动它 ⇒ **厂商模块直接不兼容**（官方原话）✗ |
+| **`CONFIG_LOCALVERSION`** | defconfig：本树 `"-Xinran_StarBai-Stars"` | 拼进 `uname -r`，**也拼进每个模块的 vermagic** | 改它必须**内核与模块同一次构建**一起刷（现在就是这么做的 ✓） |
+| **`CONFIG_MODULE_SCMVERSION`** | `init/Kconfig:2262`，本树有但没开 | 把 SCM 串塞进模块 vermagic，校验**更严** | ❌ 不要开：只会让模块更难加载 |
+
+**结论：不要伪造版本号。** 假装成 6.x 不会让缺的功能出现，反而立刻破坏模块加载
+（vermagic 不匹配 ⇒ 开不了机）。真正决定"能不能开机"的是三条：
+**① 内核与模块来自同一次构建；② 导出符号/KMI 没被破坏；③ 平台镜像需要的内核特性齐备。**
+
+活的参照物：本机这颗内核 `5.10.236-android12-9-o-g7b827c1e7f33` 就是一颗真 ACK/GKI，
+`uname -r` 里的 `android12-9` 正是"平台版本 + KMI generation"。
+
+### 3. 与 Android 17 官方 GKI（android17-6.18）的实测差距
+
+- **系统调用**：相对 android17-6.18 的官方 GKI，本树缺 26 个
+  （442–462 区间的 20 个 + `file_getattr`/`file_setattr` 与 `*xattrat` 家族等）。
+  **全部返回 ENOSYS**：arm64 的 syscall 表被 `[0 ... __NR_syscalls-1] = __arm64_sys_ni_syscall`
+  整表预填（`arch/arm64/kernel/sys.c:59`），**不会崩**；而 Android 的 userspace
+  对这些调用**都写了 fallback** ⇒ **不构成开机障碍**。
+  - 已补：**`fchmodat2`（452）** —— bionic 的 `fchmodat(AT_SYMLINK_NOFOLLOW)` 没有可用替代路径。
+  - 未补（有 fallback 且实现很大）：`mseal`、`mount_setattr`、`landlock_*`、`futex_waitv` 等。
+- **配置**：逐项对比 android17-6.18 的 `gki_defconfig`，本树补齐了 11 项
+  （cgroup 控制器 `CGROUP_PIDS`/`CFS_BANDWIDTH`/`NET_CLS_CGROUP`/`BLK_DEV_THROTTLING`，
+  netfilter `XT_MATCH_CONNBYTES`/`IP_NF_MATCH_RPFILTER`/`NF_CONNTRACK_PROCFS`，
+  IPv6 `MULTIPLE_TABLES`/`MROUTE`/`MROUTE_MULTIPLE_TABLES`/`SUBTREES`）。
+  - 故意**不**补：`ANON_VMA_NAME`/`BPF_LSM`/`MSEAL_SYSTEM_MAPPINGS`（本树没有对应代码）、
+    `LRU_GEN`（MGLRU，在 5.10 上是 **KMI-breaking**，AOSP 自己都放在 brokenkmi 分支）。
+- **启动关键项复核**（与本机那颗真 GKI 内核逐项对照）：EROFS(+ZIP) ✓、
+  fscrypt/inline-crypt ✓、dm-verity/dm-default-key ✓、binderfs ✓、incfs ✓、
+  PSI/MEMCG/MEMCG_SWAP ✓、ashmem ✓、dma-heap ✓、4K 页 ✓ —— **一致**。
+  - `EROFS_FS_ZIP_LZMA/ZSTD` 本树没有，**Google 的 android12-5.10 GKI 也没有** ⇒
+    ROM 的镜像不会用（16.18 的 GKI 才有 ZSTD），无需处理。
+  - `ENCRYPTED_KEYS` 本机 GKI 同样 not set ⇒ 不动。
+  - 16KB 页：本 SoC 是 4K（`ARM64_4K_PAGES=y`），Android 16+ 只对新机型要求 16K ⇒ 无关。
+- **KMI 安全审计**：`exp` 分支全部提交**没有删除任何 `EXPORT_SYMBOL`**、没碰
+  `android/abi_gki_aarch64*`、只**新增**了系统调用号（不重编号）⇒ 对厂商模块安全。
+
+### 4. 想让"新 Android + 这台机器"跑起来，正确路线
+
+1. **最稳**：用目标 ROM 自带的那颗 5.10 内核（社区已为"新 Android + 这台机器"验证过），
+   把自己的定制重打上去。
+2. 要用自己的树：把 **AOSP ACK**（`https://android.googlesource.com/kernel/common`，
+   分支如 `android12-5.10` / `android17-6.18`）当**权威参照**，直接对比缺什么，
+   比照 6.18 猜准得多。
+3. **权威的"要求清单"在 ROM 里，不在内核里**：解包 ROM 看
+   `*/etc/vintf/manifest.xml` 与 `*/etc/vintf/compatibility_matrix.*.xml` ——
+   后者里 `<kernel version="X.Y.Z"/>` 和 `<kernel config="CONFIG_..."/>`
+   就是平台对**内核版本 + 必需配置**的正式要求。
+4. **真正的风险不在内核版本**，而在 **vendor 分区/闭源 HAL 仍是 Android 12 时代的**
+   （VNDK/VINTF 不匹配）。
+
+### 5. 怎么快速拿到 ACK 的配置来对比（省流量版）
+
+    git clone --filter=blob:none --no-checkout --depth 1 -b android17-6.18 \
+        https://android.googlesource.com/kernel/common ack
+    cd ack && git sparse-checkout set arch/arm64/configs include/uapi/asm-generic
+    git checkout      # 只取这几个目录，约 15 MB
