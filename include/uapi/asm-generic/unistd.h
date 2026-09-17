@@ -864,8 +864,17 @@ __SC_COMP(__NR_epoll_pwait2, sys_epoll_pwait2, compat_sys_epoll_pwait2)
 #define __NR_process_mrelease 448
 __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
 
+/*
+ * 442-451 stay undefined on purpose: the table is pre-filled with
+ * __arm64_sys_ni_syscall, so they return ENOSYS exactly as before.
+ * fchmodat2 is used by newer userspace (bionic's fchmodat with
+ * AT_SYMLINK_NOFOLLOW) and has no useful fallback there.
+ */
+#define __NR_fchmodat2 452
+__SYSCALL(__NR_fchmodat2, sys_fchmodat2)
+
 #undef __NR_syscalls
-#define __NR_syscalls 449
+#define __NR_syscalls 453
 
 /*
  * 32 bit systems traditionally used different
