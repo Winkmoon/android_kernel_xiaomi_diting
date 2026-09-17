@@ -253,7 +253,7 @@ AOSP 仓库 **`kernel/configs`**（`https://android.googlesource.com/kernel/conf
 **教训（重要）**："原厂没开"或"第三方 GKI 开了"**都不能当依据**；
 权威依据只有 `kernel/configs` 里那份要求集。
 
-## 八、关于"别人补 BPF"，到底补的是什么
+## 七、关于"别人补 BPF"，到底补的是什么
 
 ### 官方对 BPF 的要求（从 `kernel/configs` 各级要求集实测）
 
