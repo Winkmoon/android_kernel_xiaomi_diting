@@ -293,3 +293,41 @@ Android 12 到 17，官方要求**几乎没变**：
   5.10 上 BTF+LTO 有踩坑可能 —— 若 `pahole` 报错，**单独 revert 这一个提交**即可
 - **代价**：vmlinux 的 BTF 段约 2~4MB（进 boot 镜像后被压缩，量级 ~1MB）
 - **收益**：用户态 eBPF 工具链可用；能力与 6.x GKI 对齐；将来写 LSM BPF 的前提
+
+## 八、"补实现"的真实清单（BPF / 系统调用），以及值不值得补
+
+### BPF 实现缺口（对照官方 android17-6.18 的 `include/uapi/linux/bpf.h`）
+
+| 类别 | 本树 | 6.18 | 缺 |
+|---|---|---|---|
+| helper 函数（`FN(...)`） | **157** | **213** | **56 个** |
+| prog type | — | — | `BPF_PROG_TYPE_SYSCALL`(5.16)、`BPF_PROG_TYPE_NETFILTER`(6.4) |
+| map type | — | — | `TASK_STORAGE`(5.16)、`BLOOM_FILTER`(5.16)、`USER_RINGBUF`(6.1)、`CGRP_STORAGE`(6.2)、`ARENA`(6.9)、两个 `_DEPRECATED` 别名 |
+
+缺的 56 个 helper 里常被点名的：
+`for_each_map_elem`(5.13)、`bpf_timer` 系列（`timer_init`/`timer_start`/`timer_cancel`/`timer_set_callback`，5.15）、
+`get_func_arg`/`get_func_ret`/`get_func_ip`（5.15）、`sys_bpf`/`sys_close`（5.16）、
+`loop`、`strncmp`（5.17）、`map_lookup_percpu_elem`（6.0）、`dynptr_*`（6.0/6.1）、
+`kptr_xchg`、`skc_to_unix_sock`、`tcp_raw_*`、`xdp_load_bytes`、`ima_*` 等。
+
+### 系统调用侧的实现缺口
+
+`futex_waitv`(449)、`mseal`(462)、`mount_setattr`(442)、`landlock_*`、`memfd_secret`
+在本树都**没有实现**。（本树 futex 已经是 `kernel/futex/` 拆分结构，但只有 `core.c`。）
+
+### 结论：该不该补
+
+- **对 Android 本身：不必补。** 官方要求集里没有它们；arm64 整表预填
+  `__arm64_sys_ni_syscall` 让它们干净返回 ENOSYS；Android 自己的 eBPF 程序按内核版本降级；
+  官方 5.10 GKI 与官方 android12-5.10 ACK 同样都没有。
+- **圈子里"补 bpf"的真实动机**：① 要 **BTF**（让 bpftool / BCC / CO-RE 这类用户态 eBPF 可用）
+  —— 本树已补 ✓；② 想要 **`sched_ext`**（BPF 调度器）这类新玩法 —— 那需要 6.12 的
+  struct_ops / kfunc / bpf_timer 一整套基础设施，在 5.10 上等于重写 BPF 子系统 ✗ 不现实。
+- **性价比排序（如果确实要加实现）**：
+
+| 候选 | 工作量 | 风险 | 对手机的收益 |
+|---|---|---|---|
+| `futex_waitv`（新系统调用） | 中（~150 行，参考 6.1 的 `kernel/futex/waitwake.c`） | 中（新增路径，不动原有 futex） | 小（Android 有 fallback） |
+| BPF `strncmp` / `loop` / `map_lookup_percpu_elem` | 中（要同步 uapi 编号） | 中（涉及 verifier） | 极小 |
+| `BPF_MAP_TYPE_USER_RINGBUF` / `BLOOM_FILTER` | 中（自包含，不影响现有类型） | 中 | 极小 |
+| `mseal` / `mount_setattr` | 大 | 高（动 mm / mount 核心） | 小 |
