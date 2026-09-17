@@ -252,3 +252,44 @@ AOSP 仓库 **`kernel/configs`**（`https://android.googlesource.com/kernel/conf
 
 **教训（重要）**："原厂没开"或"第三方 GKI 开了"**都不能当依据**；
 权威依据只有 `kernel/configs` 里那份要求集。
+
+## 八、关于"别人补 BPF"，到底补的是什么
+
+### 官方对 BPF 的要求（从 `kernel/configs` 各级要求集实测）
+
+Android 12 到 17，官方要求**几乎没变**：
+
+    # CONFIG_BPFILTER is not set
+    CONFIG_BPF_JIT=y
+    CONFIG_BPF_JIT_ALWAYS_ON=y      ← 只有 Android 16(b/)、17(c/) 新增这一条
+    CONFIG_BPF_SYSCALL=y
+    CONFIG_CGROUP_BPF=y
+    CONFIG_NETFILTER_XT_MATCH_BPF=y
+    CONFIG_NET_ACT_BPF=y
+    CONFIG_NET_CLS_BPF=y
+
+**本树全部满足**（含 16/17 才加的 `BPF_JIT_ALWAYS_ON=y`）⇒
+**不存在"不补 BPF 就跑不了新 Android"这回事**。
+
+### 别人实际在补的是这两样（只在 6.x GKI 里有）
+
+| 项 | 官方 5.10 GKI | 官方 6.18 GKI | 本树（改前） | 作用 |
+|---|---|---|---|---|
+| `CONFIG_DEBUG_INFO_BTF` | **off** | **on** | off | 内核带 BTF 类型信息（`/sys/kernel/btf/vmlinux`）⇒ 用户态 eBPF（bpftool / BCC / CO-RE）可用 |
+| `CONFIG_BPF_LSM` | **off** | **on** | off | 允许用 eBPF 写 LSM 安全策略（要有 BTF 才有意义）|
+| `CONFIG_BPF_UNPRIV_DEFAULT_OFF` | off | off | off | 两边都没开，保持一致 ✓ |
+
+本机那颗真 5.10 GKI 内核实测：`DEBUG_INFO_BTF is not set`、`BPF_LSM is not set`、
+`/sys/kernel/btf/` 不存在 ⇒ 这两样是 **6.x GKI 才有的能力**，不是 5.10 的"缺失"。
+
+### 本次动作
+
+- **`CONFIG_BPF_LSM=y`**：本树 `CONFIG_LSM` 里**本来就列了 `bpf`**
+  （`...apparmor,bpf`，test.yml 还会追加 `baseband_guard`）⇒ 打开后它才真正进入 LSM 链；
+  在没有任何 BPF LSM 程序被加载时是**空操作** ✓
+- **`CONFIG_DEBUG_INFO_BTF=y`**：CI 已装 `dwarves`(pahole) ✓、树里有 `scripts/pahole-flags.sh` ✓
+  ⇒ 可以编；`CONFIG_DEBUG_INFO` 本来就开着 ✓
+  ⚠️ **注意**：CI 用 ThinLTO（`-e LTO_CLANG -e LTO_CLANG_THIN -e THINLTO`），
+  5.10 上 BTF+LTO 有踩坑可能 —— 若 `pahole` 报错，**单独 revert 这一个提交**即可
+- **代价**：vmlinux 的 BTF 段约 2~4MB（进 boot 镜像后被压缩，量级 ~1MB）
+- **收益**：用户态 eBPF 工具链可用；能力与 6.x GKI 对齐；将来写 LSM BPF 的前提
