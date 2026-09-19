@@ -54,3 +54,40 @@ HiSilicon 的中断控制器、**不在 diting 上**，`of: property` 仅是返�
 ### 教训
 `remoteproc` / 平台驱动 API / DT 布局 这三类上游改动，**若第三方撤过，默认先不恢复**
 （容易和厂商 blobs / DSP / DTB 打架）；确实要恢复也必须单独提交 + 真机验证。
+
+## 十、怎么快速查"上游有没有新东西"，以及怎么安全地只挑修复
+
+### 1) 查最新版本（秒回，不会卡）
+
+```
+curl -sS https://www.kernel.org/releases.json | jq -r '.releases[] | select(.version|startswith("5.10"))'
+```
+
+⚠️ **不要**用 `git ls-remote <stable 仓库> 'v5.10.*'` 去列 tag —— 那仓库几千个 tag，走 HTTP 会卡死超时。
+
+### 2) 查 AOSP ACK 官方分支的新提交（gitiles 小接口，秒回）
+
+```
+curl -sS "https://android.googlesource.com/kernel/common/+log/refs/heads/android12-5.10?format=JSON&n=100" | tail -c +6 | jq -r '.log[] | "\(.commit[0:12]) \(.committer.time) \(.message|split("\n")[0])"'
+```
+
+再把每个 sha 用 `git cat-file -e <sha>^{commit}` 对本地查一遍：**本地没有的 = 你缺的**。
+
+### 3) 取单个提交的补丁并判断"是不是已经合过了"
+
+```
+curl -sS "https://android.googlesource.com/kernel/common/+/<sha>%5E%21/?format=TEXT" | base64 -d > p.patch
+git apply --check --reverse p.patch   # 成功 ⇒ 内容已在树里（可能是别的提交带进来的）⇒ 直接跳过
+```
+
+gitiles 返回的是**纯 diff、没有邮件头**，所以 `git am` 不认（`Patch format detection failed`）——
+要么手工 `git apply` + 自己建提交（保留原作者/日期 ✓），要么老老实实 fetch 整个分支。
+
+### 4) 冲突了怎么办：看"这个补丁真正在做什么"
+
+例：f2fs compress 那个 UAF 补丁在 zstd 那几行冲突，因为你树还是**旧的 lowercase zstd API**
+（`zstd_init_dstream`/`zstd_is_error`），而 ACK 已转成 `ZSTD_initDStream`/`ZSTD_isError`。
+那几行和补丁的**目的无关** ⇒ 冲突全取 ours，然后只做它真正的替换
+（`F2FS_I_SB(dic->inode)` → `dic->sbi`）✓。
+
+**教训：冲突不等于"不能合"，要先看清补丁的意图，再决定每处取哪边。**
