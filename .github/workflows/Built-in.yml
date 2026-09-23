@@ -123,8 +123,19 @@ jobs:
           restore-keys: |
             out-
 
+      - name: 清掉缓存带进来的旧成品（保留 .o 目标文件）
+        run: |
+          # out/ 缓存是为了复用编译好的 .o，但里面会带着上一次的 vmlinux / Image；
+          # 如果这次构建失败，打包步骤就会把这个旧 Image 当成新内核打进去。
+          rm -f kernel_workspace/common/out/vmlinux \
+                kernel_workspace/common/out/arch/arm64/boot/Image \
+                kernel_workspace/common/out/arch/arm64/boot/Image.gz \
+                kernel_workspace/common/out/arch/arm64/boot/Image.lz4 \
+                kernel_workspace/common/out/System.map \
+                kernel_workspace/common/out/arch/arm64/boot/System.map
+          echo "残余成品（应为空）:"; ls -l kernel_workspace/common/out/vmlinux kernel_workspace/common/out/arch/arm64/boot/Image 2>&1 || true
+
       - name: 构建内核
-        continue-on-error: true
         run: |
           cd kernel_workspace/common
           export ARCH=arm64
@@ -146,6 +157,17 @@ jobs:
           make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="ccache clang" BUILD_CONFIG=build.config.gki.aarch64 O=out DEPMOD=depmod xiaomi_diting_defconfig
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
           make -j24 O=out ARCH=arm64 CC="ccache clang" HOSTCC="ccache clang" HOSTCXX="ccache clang++" LLVM=1 LLVM_IAS=1
+
+          # 构建必须真的产出东西；否则这一步直接失败，后面不会打包、不会出工件
+          for f in out/vmlinux out/arch/arm64/boot/Image; do
+            if [ ! -s "$f" ]; then
+              echo "::error::构建产物缺失: $f —— 本次编译失败"
+              exit 1
+            fi
+          done
+          ls -l out/vmlinux out/arch/arm64/boot/Image
+          sha256sum out/arch/arm64/boot/Image
+          echo "内核构建成功 ✓"
       
       - name: 克隆 AnyKernel3 并打包
         run: |
@@ -154,7 +176,10 @@ jobs:
           git clone https://github.com/Winkmoon/AnyKernel3 --depth=1
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
+          test -s ../out/arch/arm64/boot/Image || { echo "::error::out/ 里没有 Image，拒绝打包"; exit 1; }
           cp ../out/arch/arm64/boot/Image ./Image
+          ls -l ./Image
+          sha256sum ./Image
           zip -r ../AnyKernel3_xiaomi_diting.zip ./*
       
       - name: 上传 ZIP 工件
