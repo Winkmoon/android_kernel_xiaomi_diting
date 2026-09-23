@@ -714,6 +714,17 @@ config ZSMALLOC
 	  returned by an alloc().  This handle must be mapped in order to
 	  access the allocated space.
 
+config ZSMALLOC_CHAIN_SIZE
+	int "Maximum number of physical pages per-zspage"
+	depends on ZSMALLOC
+	range 1 16
+	default 4
+	help
+	  Upper limit on the number of physical pages that a zspage can
+	  combine.  5.10 hard-coded this as 1 << ZS_MAX_ZSPAGE_ORDER (order 2,
+	  i.e. 4), so 4 keeps the original behaviour; the newer zsmalloc that
+	  came with the vendor zram now reads it from Kconfig instead.
+
 config ZSMALLOC_STAT
 	bool "Export zsmalloc statistics"
 	depends on ZSMALLOC
