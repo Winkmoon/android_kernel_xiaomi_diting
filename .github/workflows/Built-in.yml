@@ -1,4 +1,4 @@
-name: Build Kernel
+name: 生产构建
 env:
   TZ: Asia/Shanghai
   ANDROID_VERSION: 'android12'
@@ -55,10 +55,10 @@ jobs:
             neofetch
           lscpu
           neofetch
-          wget -O LLVM-20.1.0-Linux-X64.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-Linux-X64.tar.xz
-          tar -xvaf LLVM-20.1.0-Linux-X64.tar.xz
-          mv LLVM-20.1.0-Linux-X64 aosp-clang
-          rm LLVM-20.1.0-Linux-X64.tar.xz
+          wget -O LLVM-23.1.2-Linux-X64.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.2/LLVM-23.1.2-Linux-X64.tar.xz
+          tar -xvaf LLVM-23.1.2-Linux-X64.tar.xz
+          mv LLVM-23.1.2-Linux-X64 aosp-clang
+          rm -rf ./LLVM-23.1.2-Linux-X64.tar.xz
           echo "AOSP_CLANG_PATH=$(pwd)/aosp-clang" >> $GITHUB_ENV
           echo "PATH=$(pwd)/aosp-clang/bin:$PATH" >> $GITHUB_ENV
       - name: 初始化源码仓库
@@ -67,16 +67,15 @@ jobs:
           git clone --depth=1 https://github.com/Winkmoon/android_kernel_xiaomi_diting -b master common
           rm common/android/abi_gki_protected_exports_* || true
       
-      #- name: 添加 KernelSU-Next
-     #   id: ksu_version
-     #   run: |
-     #     cd kernel_workspace
-     #     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
-      
-      #- name: 添加 KernelSU-Next 配置项
-      #  run: |
-      #    cd kernel_workspace
-      #    echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/xiaomi_diting_defconfig
+      - name: 集成ReSukiSU
+        id: ksu_version
+        run: |
+          cd kernel_workspace/common
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_TOOLKIT_SUPPORT=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/xiaomi_diting_defconfig
 
       
       - name: 添加制作名称
