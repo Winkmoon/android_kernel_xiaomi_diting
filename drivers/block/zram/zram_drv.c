@@ -630,6 +630,7 @@ static ssize_t mfz_disk_quota_show(struct device *dev,
 #endif
 
 #ifdef CONFIG_ZRAM_WRITEBACK
+#ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
 static ssize_t low_compress_ratio_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t len)
@@ -656,6 +657,7 @@ static ssize_t low_compress_ratio_show(struct device *dev,
 {
 	return scnprintf(buf, PAGE_SIZE, "%u\n", glow_compress_ratio);
 }
+#endif /* CONFIG_MIUI_ZRAM_MEMORY_TRACKING */
 
 static ssize_t writeback_limit_enable_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
