@@ -129,3 +129,28 @@ FTS 触摸驱动是**厂商模块**（本树里没有 `fts_*`，日志里的 `[T
   "avoid suspend when works as device"），本树与上游 5.10.270 **零差异** ⇒ 不是 bug。
 - 日志里的 `cnss/qca6490`、`xm_power`、`mi_disp`、`healthd`、
   `(virq:irq_count)` 统计行等，全部来自**厂商模块**，不在 GKI 树内。
+
+### 补记：同一系列的另一个 backport 也 revert 了
+`039ad7273fd8 "BACKPORT: PM: WQ_UNBOUND added to pm_wq workqueue"`（Marco Crivellari 作者、
+同一个第三方 `Ramanarubp` 2026-09-14 提交、和前一个是**同一天同一批**）给 `pm_wq` 加了
+`WQ_UNBOUND` —— 让 runtime PM 的 work 不再固定在本地 CPU。它只是**调度位置**的改动，
+在手机上没有收益，但会**改变唤醒时序**，而双击亮屏正是依赖唤醒时序的那条路。
+单独一个 revert 提交（`Revert "BACKPORT: PM: WQ_UNBOUND added to pm_wq workqueue"`），
+可独立撤回。
+
+### 顺带审了一遍「非上游来源」的提交
+`14413bbb3f24..HEAD` 里有 **194 个** 带 `BACKPORT:` / `FROMLIST:` / `ANDROID:` 标记的提交，
+提交者统计：`Greg Kroah-Hartman 5579`、`Rama Bondan Prakoso 533`（第三方）、`Sasha Levin 334` …
+其中**设备相关、值得盯**的两处：
+
+1. **PM 系列**（已处理）：`18efabd8122e` + `039ad7273fd8` 两个，已各开一个 revert。
+2. **mm 的 per-cpu page 远端回收**（未动，列为观察项）：
+   `f6272832be16 FROMLIST: BACKPORT: mm/page_alloc: Remotely drain per-cpu lists`、
+   `310077eb8ccb FROMLIST: BACKPORT: mm: fix is_pinnable_page against on cma page`、
+   `b05425fb1467` / `78e708427e8f ANDROID: fix ABI breakage caused by ...`
+   —— 这是从更新内核带过来的**性能特性**（不是修复），动它会改变内存回收时序；
+   目前没有真机症状指向它，所以**没动**。若之后再出现"偶发卡顿/回收相关"的怪现象，
+   优先怀疑这一组。
+
+其余 `Revert "..."` 类提交（remoteproc / sc2731 / keyspan / v4l2 / HID / netfilter 等）
+是第三方自己的取舍，本笔记第二节已记录过其中 remoteproc 那一批（试过、卡开机、已撤回）。
