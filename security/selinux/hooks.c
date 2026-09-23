@@ -46,6 +46,11 @@
 #include <linux/fdtable.h>
 #include <linux/namei.h>
 #include <linux/mount.h>
+#ifdef CONFIG_SECURITY_SELINUX_ZRAM_ALLOW
+#include <linux/fs.h>
+#include <linux/magic.h>
+#include <linux/kernfs.h>
+#endif
 #include <linux/fs_context.h>
 #include <linux/fs_parser.h>
 #include <linux/netfilter_ipv4.h>
@@ -3088,6 +3093,49 @@ static noinline int audit_inode_permission(struct inode *inode,
 	return 0;
 }
 
+#ifdef CONFIG_SECURITY_SELINUX_ZRAM_ALLOW
+/*
+ * The ROM's SELinux policy has never heard of the zram recompression
+ * attributes, so a root shell gets denied when it tries to drive them.
+ * Let uid 0 write exactly those three attribute names under a zram device.
+ * Deliberately narrow: three names, root only, write only.
+ */
+static bool selinux_zram_attr_write_allowed(struct inode *inode, int mask)
+{
+	struct kernfs_node *kn;
+	char name[32];
+	char pname[32];
+
+	if (!(mask & MAY_WRITE))
+		return false;
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID))
+		return false;
+	/*
+	 * Only sysfs inodes carry a kernfs_node in i_private; on any other
+	 * filesystem i_private is somebody else's pointer.  This check is what
+	 * makes the cast below safe.
+	 */
+	if (inode->i_sb->s_magic != SYSFS_MAGIC)
+		return false;
+	if (!inode->i_private)
+		return false;
+
+	kn = inode->i_private;
+	if ((kn->flags & KERNFS_TYPE_MASK) != KERNFS_FILE || !kn->parent)
+		return false;
+	if (kernfs_name(kn, name, sizeof(name)) < 0)
+		return false;
+	if (kernfs_name(kn->parent, pname, sizeof(pname)) < 0)
+		return false;
+	if (strncmp(pname, "zram", 4) != 0)
+		return false;
+
+	return !strcmp(name, "recompress") ||
+	       !strcmp(name, "recomp_algorithm") ||
+	       !strcmp(name, "idle");
+}
+#endif
+
 static int selinux_inode_permission(struct inode *inode, int mask)
 {
 	const struct cred *cred = current_cred();
@@ -3106,6 +3154,11 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	/* No permission to check.  Existence test. */
 	if (!mask)
 		return 0;
+
+#ifdef CONFIG_SECURITY_SELINUX_ZRAM_ALLOW
+	if (selinux_zram_attr_write_allowed(inode, mask))
+		return 0;
+#endif
 
 	validate_creds(cred);
 

@@ -61,6 +61,23 @@ config SECURITY_SELINUX_DEVELOP
 	  permissive mode (if permitted by the policy) via
 	  /sys/fs/selinux/enforce.
 
+config SECURITY_SELINUX_ZRAM_ALLOW
+	bool "Allow root to write the zram recompression control attributes"
+	depends on SECURITY_SELINUX && ZRAM
+	default n
+	help
+	  The vendor zram driver exposes recompression controls as sysfs
+	  attributes under /sys/block/zramN: recompress, recomp_algorithm and
+	  idle.  A ROM's SELinux policy has never heard of those names, so even
+	  a root shell gets "avc: denied" when it tries to drive them.
+
+	  With this option the kernel lets uid 0 write exactly those three
+	  attribute names under a zram device, regardless of the policy.  It is
+	  narrow on purpose: three attribute names, root only, write only.
+	  (Root on such a device can switch SELinux off entirely anyway, so this
+	   does not meaningfully widen the attack surface - it only makes the
+	   recompression feature usable.)
+
 config SECURITY_SELINUX_AVC_STATS
 	bool "NSA SELinux AVC Statistics"
 	depends on SECURITY_SELINUX
