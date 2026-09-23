@@ -30,16 +30,18 @@
 
 
 /*
- * The lower ZRAM_FLAG_SHIFT bits of table.flags is for
- * object size (excluding header), the higher bits is for
- * zram_pageflags.
+ * ZRAM is mainly used for memory efficiency so we want to keep memory
+ * footprint small and thus squeeze size and zram pageflags into a flags
+ * member. The lower ZRAM_FLAG_SHIFT bits is for object size (excluding
+ * header), which cannot be larger than PAGE_SIZE (requiring PAGE_SHIFT
+ * bits), the higher bits are for zram_pageflags.
  *
- * zram is mainly used for memory efficiency so we want to keep memory
- * footprint small so we can squeeze size and flags into a field.
- * The lower ZRAM_FLAG_SHIFT bits is for object size (excluding header),
- * the higher bits is for zram_pageflags.
+ * We use BUILD_BUG_ON() to make sure that zram pageflags don't overflow.
  */
-#define ZRAM_FLAG_SHIFT 24
+#define ZRAM_FLAG_SHIFT (PAGE_SHIFT + 1)
+
+/* Only 2 bits are allowed for comp priority index */
+#define ZRAM_COMP_PRIORITY_MASK	0x3
 
 /* Flags for zram pages (table[page_no].flags) */
 enum zram_pageflags {
@@ -49,10 +51,41 @@ enum zram_pageflags {
 	ZRAM_WB,	/* page is stored on backing_device */
 	ZRAM_UNDER_WB,	/* page is under writeback */
 	ZRAM_HUGE,	/* Incompressible page */
+	ZRAM_COMPRESS_LOW, /*lower than aim compaction ratio */
+	ZRAM_PP_SLOT,	/* Selected for post-processing */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+	ZRAM_INCOMPRESSIBLE, /* none of the algorithms could compress it */
 
+	ZRAM_COMP_PRIORITY_BIT1, /* First bit of comp priority index */
+	ZRAM_COMP_PRIORITY_BIT2, /* Second bit of comp priority index */
+
+#if defined(CONFIG_ZRAM_WRITEBACK)
+	ZRAM_WRITEBACK_PROTECTED, /* the page is writeback protected */
+#if defined(CONFIG_MI_MEMORY_FREEZE)
+	ZRAM_WRITEBACK_UNLIMITED, /* the MemoryFreeze cgroup page can wrieback unlimitedly*/
+#endif
+#endif
 	__NR_ZRAM_PAGEFLAGS,
 };
+
+#define ZRAM_WB_IDLE_SHIFT (__NR_ZRAM_PAGEFLAGS)
+
+#define ZRAM_WB_IDLE_BITS_LEN (4U)
+
+#define ZRAM_WB_IDLE_MIN (1U)
+#define ZRAM_WB_IDLE_MAX (10U)
+
+#define ZRAM_WB_IDLE_DEFAULT ZRAM_WB_IDLE_MIN
+
+#ifdef CONFIG_ZRAM_WRITEBACK
+#define MAX_WRITEBACK_ORDER		5
+#define MAX_WRITEBACK_SIZE		(1 << MAX_WRITEBACK_ORDER)
+struct writeback_batch_pages
+{
+	struct page *page;
+	int index;
+};
+#endif
 
 /*-- Data structures */
 
@@ -63,22 +96,24 @@ struct zram_table_entry {
 		unsigned long element;
 	};
 	unsigned long flags;
-#ifdef CONFIG_ZRAM_MEMORY_TRACKING
+#if defined(CONFIG_ZRAM_MEMORY_TRACKING) || defined(CONFIG_MIUI_ZRAM_MEMORY_TRACKING)
 	ktime_t ac_time;
 #endif
 };
 
 struct zram_stats {
 	atomic64_t compr_data_size;	/* compressed size of pages stored */
-	atomic64_t num_reads;	/* failed + successful */
-	atomic64_t num_writes;	/* --do-- */
 	atomic64_t failed_reads;	/* can happen when memory is too low */
 	atomic64_t failed_writes;	/* can happen when memory is too low */
-	atomic64_t invalid_io;	/* non-page-aligned I/O requests */
 	atomic64_t notify_free;	/* no. of swap slot free notifications */
 	atomic64_t same_pages;		/* no. of same element filled pages */
 	atomic64_t huge_pages;		/* no. of huge pages */
+	atomic64_t huge_pages_since;	/* no. of huge pages since zram set up */
 	atomic64_t pages_stored;	/* no. of pages currently stored */
+	atomic64_t lowratio_pages;
+#ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+	atomic64_t origin_pages_max;	/* no. of maximum origin pages stored */
+#endif
 	atomic_long_t max_used_pages;	/* no. of maximum pages stored */
 	atomic64_t writestall;		/* no. of write slow paths */
 	atomic64_t miss_free;		/* no. of missed free */
@@ -86,13 +121,42 @@ struct zram_stats {
 	atomic64_t bd_count;		/* no. of pages in backing device */
 	atomic64_t bd_reads;		/* no. of reads from backing device */
 	atomic64_t bd_writes;		/* no. of writes from backing device */
+	atomic64_t mf_bd_count;		/* no. of memory_freeze pages in backing device */
+	atomic64_t mf_bd_reads;		/* no. of memory_freeze reads from backing device */
+	atomic64_t mf_bd_writes;	/* no. of memory_freeze writes from backing device */
+	atomic64_t total_idle_count[ZRAM_WB_IDLE_MAX];  /* no. of zram idle page array */
+#ifdef CONFIG_MI_MEMORY_FREEZE
+	atomic64_t mfz_compr_data_size;	/* compressed size of memory_freeze stored */
+#endif
+#ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+	atomic64_t wb_pages_max;	/* no. of max pages in backing device */
+#endif
 #endif
 };
+
+#ifdef CONFIG_ZRAM_MULTI_COMP
+#define ZRAM_PRIMARY_COMP	0U
+#define ZRAM_SECONDARY_COMP	1U
+#define ZRAM_MAX_COMPS	4U
+#else
+#define ZRAM_PRIMARY_COMP	0U
+#define ZRAM_SECONDARY_COMP	0U
+#define ZRAM_MAX_COMPS	1U
+#endif
+
+#ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+struct zram_pages_life {
+	unsigned int time_nr;
+	int *time_list;
+	unsigned long *lifes;
+	struct rcu_head rcu;
+};
+#endif
 
 struct zram {
 	struct zram_table_entry *table;
 	struct zs_pool *mem_pool;
-	struct zcomp *comp;
+	struct zcomp *comps[ZRAM_MAX_COMPS];
 	struct gendisk *disk;
 	/* Prevent concurrent execution of device init */
 	struct rw_semaphore init_lock;
@@ -107,31 +171,35 @@ struct zram {
 	 * we can store in a disk.
 	 */
 	u64 disksize;	/* bytes */
-	char compressor[CRYPTO_MAX_ALG_NAME];
+	const char *comp_algs[ZRAM_MAX_COMPS];
+	s8 num_active_comps;
 	/*
 	 * zram is claimed so open request will be failed
 	 */
 	bool claim; /* Protected by bdev->bd_mutex */
-	struct file *backing_dev;
 #ifdef CONFIG_ZRAM_WRITEBACK
+	struct file *backing_dev;
 	spinlock_t wb_limit_lock;
 	bool wb_limit_enable;
 	u64 bd_wb_limit;
 	struct block_device *bdev;
-	unsigned int old_block_size;
 	unsigned long *bitmap;
 	unsigned long nr_pages;
-#ifdef CONFIG_ZRAM_RECLAIM
-	/*
-	 * Cold-page reclaim: a kernel-side timer offloads the slots that
-	 * stayed untouched for a whole ZRAM_RECLAIM_INTERVAL_MS.  No userspace
-	 * involvement.
-	 */
-	struct delayed_work reclaim_work;
+	/* for batch writeback */
+	struct page *writeback_pages;
 #endif
+#if defined(CONFIG_ZRAM_WRITEBACK) && defined(CONFIG_MI_MEMORY_FREEZE)
+	unsigned long mfz_disk_quota;
+	unsigned int mfz_enable;
 #endif
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 	struct dentry *debugfs_dir;
+#endif
+#ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+	struct zram_pages_life __rcu *pages_life;
+	ktime_t first_time;
+	ktime_t last_time;
+	atomic64_t avg_size;
 #endif
 };
 #endif

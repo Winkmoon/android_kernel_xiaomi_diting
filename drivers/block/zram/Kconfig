@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 config ZRAM
 	tristate "Compressed RAM block device support"
-	depends on BLOCK && SYSFS && ZSMALLOC && CRYPTO
-	depends on CRYPTO_LZO || CRYPTO_ZSTD || CRYPTO_LZ4 || CRYPTO_LZ4HC || CRYPTO_842 || CRYPTO_LZ4K || CRYPTO_LZ4K_OPLUS || CRYPTO_LZ4KD || CRYPTO_DEFLATE
+	depends on BLOCK && SYSFS && MMU
+	depends on CRYPTO_LZO || CRYPTO_ZSTD || CRYPTO_LZ4 || CRYPTO_LZ4HC || CRYPTO_842
+	select ZSMALLOC
 	help
 	  Creates virtual block devices called /dev/zramX (X = 0, 1, ...).
 	  Pages written to these disks are compressed and stored in memory
@@ -43,22 +44,6 @@ config ZRAM_DEF_COMP_842
 	bool "842"
 	depends on CRYPTO_842
 
-config ZRAM_DEF_COMP_LZ4K
-	bool "lz4k"
-	depends on CRYPTO_LZ4K
-	
-config ZRAM_DEF_COMP_LZ4K_OPLUS
-	bool "lz4k"
-	depends on CRYPTO_LZ4K_OPLUS
-
-config ZRAM_DEF_COMP_LZ4KD
-	bool "lz4kd"
-	depends on CRYPTO_LZ4KD
-
-config ZRAM_DEF_COMP_DEFLATE
-	bool "deflate"
-	depends on CRYPTO_DEFLATE
-
 endchoice
 
 config ZRAM_DEF_COMP
@@ -69,10 +54,6 @@ config ZRAM_DEF_COMP
 	default "lzo" if ZRAM_DEF_COMP_LZO
 	default "lz4hc" if ZRAM_DEF_COMP_LZ4HC
 	default "842" if ZRAM_DEF_COMP_842
-	default "lz4k" if ZRAM_DEF_COMP_LZ4K
-    default "lz4k_oplus" if ZRAM_DEF_COMP_LZ4K_OPLUS
-	default "lz4kd" if ZRAM_DEF_COMP_LZ4KD
-	default "deflate" if ZRAM_DEF_COMP_DEFLATE
 
 config ZRAM_WRITEBACK
        bool "Write back incompressible or idle page to backing device"
@@ -88,48 +69,6 @@ config ZRAM_WRITEBACK
 
 	 See Documentation/admin-guide/blockdev/zram.rst for more information.
 
-config ZRAM_RECLAIM
-	bool "Periodically reclaim cold pages of zram (kernel-side)"
-	depends on ZRAM_WRITEBACK
-	default n
-	help
-	 Periodically write back the pages of a zram device that have not
-	 been accessed for a whole interval, so the RAM consumed by zram is
-	 bounded.  This is entirely kernel-side: a delayed work item marks
-	 every slot idle, then offloads the slots that stayed untouched (the
-	 I/O paths clear the idle bit on access).  No userspace daemon, no
-	 script and no sysfs knob is involved.
-
-	 This needs a backing device configured before the size is set (for
-	 example from the device's fstab), see ZRAM_WRITEBACK above.
-
-config ZRAM_RECLAIM_INTERVAL_MS
-	int "zram reclaim interval / idle aging window (ms)"
-	depends on ZRAM_RECLAIM
-	default 300000
-	help
-	 How often the reclaim worker runs and, at the same time, how long a
-	 page must stay untouched before it counts as cold.
-
-config ZRAM_RECLAIM_LIMIT_MB
-	int "maximum offloaded per reclaim round (MB)"
-	depends on ZRAM_RECLAIM
-	default 64
-	help
-	 Upper bound on how much a single reclaim round may write to the
-	 backing device, so one round cannot dump the whole device at once.
-
-config ZRAM_RECLAIM_WATERMARK_MB
-	int "zram reclaim available-memory watermark (MB, 0 = no writeback)"
-	depends on ZRAM_RECLAIM
-	default 0
-	help
-	 Cold pages are only moved to the backing device while the system has
-	 less than this much available memory.  Handing fragmented zspages
-	 back to the page allocator (i.e. reclaiming physical memory) happens
-	 every round regardless.  Zero disables writeback completely, so only
-	 physical memory is reclaimed.
-
 config ZRAM_MEMORY_TRACKING
 	bool "Track zRam block status"
 	depends on ZRAM && DEBUG_FS
@@ -139,3 +78,43 @@ config ZRAM_MEMORY_TRACKING
 	  /sys/kernel/debug/zram/zramX/block_state.
 
 	  See Documentation/admin-guide/blockdev/zram.rst for more information.
+
+config ZRAM_MULTI_COMP
+	bool "Enable multiple compression streams"
+	depends on ZRAM
+	help
+	  This will enable multi-compression streams, so that ZRAM can
+	  re-compress pages using a potentially slower but more effective
+	  compression algorithm. Note, that IDLE page recompression
+	  requires ZRAM_MEMORY_TRACKING.
+
+config MIUI_ZRAM_MEMORY_TRACKING
+	bool "Track zRam stats"
+	depends on ZRAM
+	help
+	  With this feature, admin can track the state of zram
+	  of zRAM. Admin could see the information via
+	  /sys/block/zramX/.
+
+	  See Documentation/blockdev/zram.txt for more information.
+
+config MI_MEMORY_FREEZE
+	bool "Control zRam writeback"
+	depends on ZRAM
+	help
+	  With this feature, admin can control the writeback of zram.
+
+config ZRAM_KCOMPRESSD_OPT
+	bool "use Kcompressd thread to Boost ZRAM Performance"
+	depends on ZRAM
+	help
+	  use a separate kernel thread ("Kcompressd") to assist with
+	  zram_bio request, there improve ZRAM compress performance
+
+config ZRAM_KSHRINK_SLABD
+	bool "use kshrink_slabd thread Offload the load kswapd0"
+	depends on ZRAM
+	help
+	  Used to convert synchronous, blocking garbage collection
+	  to async garbage collection in a background kernel thread,
+	  thereby reducing system latency on under high memory load.
