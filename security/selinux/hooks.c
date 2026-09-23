@@ -48,7 +48,7 @@
 #include <linux/mount.h>
 #ifdef CONFIG_SECURITY_SELINUX_ZRAM_ALLOW
 #include <linux/fs.h>
-#include <linux/magic.h>
+#include <uapi/linux/magic.h>
 #include <linux/kernfs.h>
 #endif
 #include <linux/fs_context.h>
