@@ -147,8 +147,7 @@ jobs:
           export LLVM_IAS=0
           export KCFLAGS="-Wno-error -Wno-deprecated-declarations"
           export KBUILD_BUILD_VERSION="0"
-          # 用提交时间而不是当前时间：既保持可复现，又不让 ccache 每次全失效
-          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH=$(date +%s)
           export CCACHE_DIR=$HOME/.ccache
           export CCACHE_MAXSIZE=2G
           export CCACHE_COMPRESS=true
