@@ -91,3 +91,41 @@ gitiles 返回的是**纯 diff、没有邮件头**，所以 `git am` 不认（`P
 （`F2FS_I_SB(dic->inode)` → `dic->sbi`）✓。
 
 **教训：冲突不等于"不能合"，要先看清补丁的意图，再决定每处取哪边。**
+
+## 十一、记录：双击亮屏要按好几下（已 revert 一个第三方 backport）
+
+### 背景
+升级到 5.10.270 之后，真机上**双击亮屏要点好几下才亮**，而**双击熄屏正常**。
+日志（`22222.txt`，dmesg 644s～698s）里能看到手势事件确实上报了：
+`[TP-Driver] [ FTS ] fts_gesture_event_handler: double tap !`，
+随后是 DRM notifier → `System resetting...` → `fts_mode_handler: Screen ON...` 这条 resume 路径。
+
+### 根因
+第三方（`Ramanarubp`，2026-09-14 提交、作者 Rafael J. Wysocki）backport 的
+`18efabd8122e "BACKPORT: PM: sleep: Do not flag runtime PM workqueue as freezable"`
+把 `__device_suspend_late()` 里的 `__pm_runtime_disable(dev, false)`
+换成了 **`pm_runtime_disable(dev)`**。
+
+后者会置位 `disable_depth`：**在 `device_resume_early()` 里配对 `pm_runtime_enable()`
+之前，该设备的任何 runtime PM 调用都会失败**（补丁自己加的注释就是这么写的）。
+
+FTS 触摸驱动是**厂商模块**（本树里没有 `fts_*`，日志里的 `[TP-Driver]` 也搜不到 ⇒
+它来自 vendor 分区），它的手势唤醒路径要在中断里对触摸设备做 runtime PM resume。
+**第一次双击正好落在这个窗口内 ⇒ resume 失败 ⇒ 屏幕不亮**，
+多点几下等系统 resume 走完才成功 —— 与报告的现象完全一致。
+
+### 取舍
+整条 revert（它另外还各改了 `Documentation/power/runtime_pm.rst` 和
+`kernel/power/main.c` 一处），**单开一个提交**便于单独撤回：
+
+- revert 后双击恢复正常 ⇒ 保留；
+- 若无效 ⇒ `git revert` 掉这个 revert，再往别处查（下一个怀疑对象：
+  `drivers/base/platform.c` 的 422 行改动、`kernel/irq/irqdomain.c`）。
+
+### 顺带记录（同一次排查里排除掉的）
+- `xm_power: active wake lock: a600000.ssusb, active_since: 521041ms` ——
+  看着吓人，但 `drivers/usb/mtu3/mtu3_dr.c` 那段 `pm_stay_awake()` **是上游自己的**
+  （`d0ed062a8b75 "usb: mtu3: dual-role mode support"`，注释写着
+  "avoid suspend when works as device"），本树与上游 5.10.270 **零差异** ⇒ 不是 bug。
+- 日志里的 `cnss/qca6490`、`xm_power`、`mi_disp`、`healthd`、
+  `(virq:irq_count)` 统计行等，全部来自**厂商模块**，不在 GKI 树内。
